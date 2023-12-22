@@ -53,7 +53,7 @@ class JitMaker:
         print("Subscribed to Drift Client")
 
         await self.slot_subscriber.subscribe()
-        self.slot_subscriber.event_emitter += self.on_slot_update_sync
+        self.slot_subscriber.event_emitter.on_slot_change += self.on_slot_update_sync
         print("Subscribed to Slot Subscriber")
 
         await self.usermap.subscribe()
