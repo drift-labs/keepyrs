@@ -1,6 +1,9 @@
 import asyncio
 import os
+import logging
+import time
 
+from datetime import datetime
 from typing import Optional, Union
 from dotenv import load_dotenv
 
@@ -29,6 +32,10 @@ from jit_proxy.jit_proxy_client import JitProxyClient, PriceType  # type: ignore
 from keepyr_types import Bot, JitMakerConfig
 
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 class JitMaker(Bot):
     def __init__(
         self,
@@ -38,13 +45,25 @@ class JitMaker(Bot):
         jitter: Union[JitterSniper, JitterShotgun],
         drift_env: DriftEnv,
     ):
-        self.lookup_tables = None
+        self.drift_env = drift_env
 
+        # Default values for some attributes
+        self.lookup_tables = None
+        self.tasks: list[asyncio.Task] = []
+        self.default_interval_ms = 30_000
+
+        # Set up locks, etc.
+        self.task_lock = asyncio.Lock()
+        self.watchdog = asyncio.Lock()
+        self.watchdog_last_pat = time.time()
+
+        # Set up attributes from config
         self.name = config.bot_id
         self.dry_run = config.dry_run
         self.sub_accounts = config.sub_accounts
         self.perp_market_indexes = config.perp_market_indexes
 
+        # Set up clients & subscriptions
         self.drift_client = drift_client
         self.usermap = usermap
         self.jitter = jitter
@@ -58,23 +77,66 @@ class JitMaker(Bot):
         self.dlob_client = DLOBClient("https://dlob.drift.trade", dlob_config)
 
     async def init(self):
-        print(f"Initializing {self.name}")
+        logger.info(f"Initializing {self.name}")
 
         await self.slot_subscriber.subscribe()
         await self.dlob_client.subscribe()
 
         self.lookup_tables = await self.drift_client.fetch_market_lookup_table()
 
-        print(f"Initialized {self.name}")
-
-    async def health_check(self):
-        pass
+        logger.info(f"Initialized {self.name}")
 
     async def reset(self):
-        pass
+        for task in self.tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self.tasks.clear()
+        logger.info(f"{self.name} reset complete")
 
-    async def start_interval_loop(self, interval_ms: int | None):
-        pass
+    async def start_interval_loop(self, interval_ms: int | None = 1000):
+        async def interval_loop():
+            try:
+                while True:
+                    await self.run_periodic_tasks()
+                    await asyncio.sleep(interval_ms / 1000)
+            except asyncio.CancelledError:
+                pass
+
+        task = asyncio.create_task(interval_loop())
+        self.tasks.append(task)
+        logger.info(f"{self.name} Bot started! driftEnv: {self.drift_env}")
+
+    async def health_check(self):
+        healthy = False
+        async with self.watchdog:
+            healthy = self.watchdog_last_pat > time.time() - (
+                2 * self.default_interval_ms // 1_000
+            )
+        return healthy
+
+    async def run_periodic_tasks(self):
+        start = time.time()
+        ran = False
+        try:
+            async with self.task_lock:
+                logger.info(
+                    f"{datetime.fromtimestamp(start).isoformat()} running jit periodic tasks"
+                )
+                # simulate some task
+                await asyncio.sleep(1)
+                ran = True
+        except Exception as e:
+            pass
+        finally:
+            if ran:
+                duration = time.time() - start
+                logger.info(f"{self.name} took {duration} s to run")
+
+                async with self.watchdog:
+                    self.watchdog_last_pat = time.time()
 
 
 async def main():
@@ -123,6 +185,11 @@ async def main():
     jit_maker = JitMaker(jit_maker_config, drift_client, usermap, jitter, "mainnet")
 
     await jit_maker.init()
+
+    await jit_maker.start_interval_loop(10_000)
+    await asyncio.sleep(30)
+    print(await jit_maker.health_check())
+    await jit_maker.reset()
 
     # quick & dirty way to keep event loop open
     # try:

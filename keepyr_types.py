@@ -13,7 +13,7 @@ class Bot(ABC):
         pass
 
     @abstractmethod
-    async def start_interval_loop(self, interval_ms: Optional[int]):
+    async def start_interval_loop(self, interval_ms: Optional[int] = 1000):
         pass
 
     @abstractmethod
