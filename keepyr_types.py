@@ -1,14 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Optional
+from dataclasses import dataclass
 
 
 class Bot(ABC):
-    @abstractmethod
-    def __init__(self, name: str, dry_run: bool, default_interval_ms: Optional[int]):
-        self.name = name
-        self.dry_run = dry_run
-        self.default_interval_ms = default_interval_ms
-
     @abstractmethod
     async def init(self):
         pass
@@ -24,3 +19,15 @@ class Bot(ABC):
     @abstractmethod
     async def health_check(self):
         pass
+
+
+@dataclass
+class BotConfig:
+    bot_id: str
+    dry_run: bool
+
+
+@dataclass
+class JitMakerConfig(BotConfig):
+    perp_market_indexes: Optional[list[int]]
+    sub_accounts: Optional[list[int]]

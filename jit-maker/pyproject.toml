@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "jit-maker"
+version = "0.1.0"
+description = ""
+authors = ["soundsonacid <soundsonacid@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+jit-proxy = {path = "/Users/frankfinnegan/Documents/musings/drift/jit-proxy/python"}
+driftpy = {path = "/Users/frankfinnegan/Documents/musings/drift/driftpy"}
+python-dotenv = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
