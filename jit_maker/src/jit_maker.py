@@ -30,7 +30,12 @@ from jit_proxy.jitter.base_jitter import JitParams  # type: ignore
 from jit_proxy.jit_proxy_client import JitProxyClient, PriceType  # type: ignore
 
 from keepyr_types import Bot, JitMakerConfig
+from keepyr_utils import (
+    get_best_limit_ask_exclusionary,
+    get_best_limit_bid_exclusionary,
+)
 
+from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile  # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -129,7 +134,7 @@ class JitMaker(Bot):
                 await asyncio.sleep(1)
                 ran = True
         except Exception as e:
-            pass
+            raise e
         finally:
             if ran:
                 duration = time.time() - start
