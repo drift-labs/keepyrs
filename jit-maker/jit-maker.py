@@ -1,7 +1,7 @@
 import asyncio
 import os
 
-from typing import Union
+from typing import Optional, Union
 from dotenv import load_dotenv
 
 from solana.rpc.async_api import AsyncClient
@@ -67,6 +67,15 @@ class JitMaker(Bot):
 
         print(f"Initialized {self.name}")
 
+    async def health_check(self):
+        pass
+
+    async def reset(self):
+        pass
+
+    async def start_interval_loop(self, interval_ms: int | None):
+        pass
+
 
 async def main():
     load_dotenv()
@@ -108,6 +117,12 @@ async def main():
 
     jitter.update_perp_params(0, jit_params)
     jitter.update_spot_params(0, jit_params)
+
+    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
+
+    jit_maker = JitMaker(jit_maker_config, drift_client, usermap, jitter, "mainnet")
+
+    await jit_maker.init()
 
     # quick & dirty way to keep event loop open
     # try:
