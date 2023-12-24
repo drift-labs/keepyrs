@@ -6,7 +6,7 @@ from driftpy.dlob.dlob_node import DLOBNode
 from driftpy.types import OraclePriceData, MarketType
 
 
-def get_best_limit_ask_exclusionary(
+def get_best_limit_bid_exclusionary(
     dlob: DLOB,
     market_index: int,
     market_type: MarketType,
@@ -20,6 +20,7 @@ def get_best_limit_ask_exclusionary(
     )
 
     for bid in bids:
+        print("processing bid")
         if hasattr(bid, "user_account"):
             if str(bid.user_account) == excluded_pubkey:
                 continue
@@ -36,7 +37,7 @@ def get_best_limit_ask_exclusionary(
     return None
 
 
-def get_best_limit_bid_exclusionary(
+def get_best_limit_ask_exclusionary(
     dlob: DLOB,
     market_index: int,
     market_type: MarketType,
@@ -50,6 +51,7 @@ def get_best_limit_bid_exclusionary(
     )
 
     for ask in asks:
+        print("processing ask")
         if hasattr(ask, "user_account"):
             if str(ask.user_account) == excluded_pubkey:
                 continue

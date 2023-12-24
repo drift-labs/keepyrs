@@ -21,6 +21,7 @@ from driftpy.user_map.user_map import UserMap
 from driftpy.user_map.user_map_config import UserMapConfig, WebsocketConfig
 from driftpy.dlob.dlob_client import DLOBClient
 from driftpy.dlob.client_types import DLOBClientConfig
+from driftpy.types import MarketType
 from driftpy.constants.config import DriftEnv
 from driftpy.keypair import load_keypair
 
@@ -35,7 +36,7 @@ from keepyr_utils import (
     get_best_limit_bid_exclusionary,
 )
 
-from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile  # type: ignore
+from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile, place_resting_orders  # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class JitMaker(Bot):
     async def init(self):
         logger.info(f"Initializing {self.name}")
 
+        await self.drift_client.subscribe()
         await self.slot_subscriber.subscribe()
         await self.dlob_client.subscribe()
 
@@ -130,8 +132,96 @@ class JitMaker(Bot):
                 logger.info(
                     f"{datetime.fromtimestamp(start).isoformat()} running jit periodic tasks"
                 )
-                # simulate some task
-                await asyncio.sleep(1)
+
+                for i in range(len(self.perp_market_indexes)):
+                    perp_idx = self.perp_market_indexes[i]
+                    sub_id = self.sub_accounts[i]
+                    self.drift_client.switch_active_user(sub_id)
+
+                    drift_user = self.drift_client.get_user(sub_id)
+                    perp_market_account = self.drift_client.get_perp_market_account(
+                        perp_idx
+                    )
+                    oracle_price_data = (
+                        self.drift_client.get_oracle_price_data_for_perp_market(
+                            perp_idx
+                        )
+                    )
+
+                    num_markets_for_subaccount = len(
+                        [num for num in self.sub_accounts if num == sub_id]
+                    )
+
+                    # check whether or not maker hedges
+                    match perp_idx:
+                        case 0:
+                            spot_idx = 1
+                        case 1:
+                            spot_idx = 3
+                        case 2:
+                            spot_idx = 4
+                        case _:
+                            spot_idx = 0
+
+                    def user_filter(user_account, user_key: str, order) -> bool:
+                        skip = user_key == str(drift_user.user_public_key)
+
+                        if is_market_volatile(
+                            perp_market_account, oracle_price_data, 0.015  # 150 bps
+                        ):
+                            logger.info("Skipping, market is volatile")
+                            skip = True
+
+                        if skip:
+                            logger.info(f"Skipping user: {user_key}")
+
+                        return skip
+
+                    self.jitter.set_user_filter(user_filter)
+
+                    best_bid = get_best_limit_bid_exclusionary(
+                        self.dlob_client.dlob,
+                        perp_market_account.market_index,
+                        MarketType.Perp(),
+                        oracle_price_data.slot,
+                        oracle_price_data,
+                        str(drift_user.user_public_key),
+                    )
+
+                    best_ask = get_best_limit_ask_exclusionary(
+                        self.dlob_client.dlob,
+                        perp_market_account.market_index,
+                        MarketType.Perp(),
+                        oracle_price_data.slot,
+                        oracle_price_data,
+                        str(drift_user.user_public_key),
+                    )
+
+                    if not best_bid or not best_ask:
+                        logger.warning("skipping, no best bid / ask")
+                        return
+
+                    best_bid_price = best_bid.get_price(
+                        oracle_price_data, self.dlob_client.slot_source.get_slot()
+                    )
+
+                    best_ask_price = best_ask.get_price(
+                        oracle_price_data, self.dlob_client.slot_source.get_slot()
+                    )
+
+                    logger.info(f"best bid price: {best_bid_price}")
+                    logger.info(f"best ask price: {best_ask_price}")
+
+                    await place_resting_orders(
+                        self.drift_client,
+                        perp_market_account,
+                        oracle_price_data,
+                        (best_bid_price + best_ask_price) // 2,
+                    )
+
+                await asyncio.sleep(10)
+
+                logger.info(f"done: {time.time() - start}s")
                 ran = True
         except Exception as e:
             raise e
@@ -164,6 +254,8 @@ async def main():
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
     usermap = UserMap(usermap_config)
 
+    await usermap.subscribe()
+
     auction_subscriber = AuctionSubscriber(AuctionSubscriberConfig(drift_client))
 
     jit_proxy_client = JitProxyClient(
@@ -186,6 +278,9 @@ async def main():
     jitter.update_spot_params(0, jit_params)
 
     jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
+
+    for sub_id in jit_maker_config.sub_accounts:
+        await drift_client.add_user(sub_id)
 
     jit_maker = JitMaker(jit_maker_config, drift_client, usermap, jitter, "mainnet")
 

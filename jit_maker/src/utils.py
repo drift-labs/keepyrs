@@ -45,6 +45,7 @@ async def place_resting_orders(
             market_index=perp_market_account.market_index,
             order_type=OrderType.Limit(),
             direction=PositionDirection.Long(),
+            market_type=MarketType.Perp(),
             base_asset_amount=perp_market_account.amm.order_step_size * 5,
             oracle_price_offset=mark_offset
             - (perp_market_account.amm.order_tick_size * 15),
@@ -55,6 +56,7 @@ async def place_resting_orders(
             market_index=perp_market_account.market_index,
             order_type=OrderType.Limit(),
             direction=PositionDirection.Short(),
+            market_type=MarketType.Perp(),
             base_asset_amount=perp_market_account.amm.order_step_size * 5,
             oracle_price_offset=max(
                 PRICE_PRECISION // 150,
