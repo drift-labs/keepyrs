@@ -229,6 +229,8 @@ class JitMaker(Bot):
                         (best_bid_price + best_ask_price) // 2,
                     )
 
+                    logger.info("resting orders placed")
+
                     bid_offset = best_bid_price - oracle_price_data.price
                     ask_offset = best_ask_price - oracle_price_data.price
 
@@ -323,18 +325,6 @@ async def main():
 
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client)
 
-    jit_params = JitParams(
-        bid=-1_000_000,
-        ask=1_010_000,
-        min_position=0,
-        max_position=2,
-        price_type=PriceType.Oracle(),
-        sub_account_id=None,
-    )
-
-    jitter.update_perp_params(0, jit_params)
-    jitter.update_spot_params(0, jit_params)
-
     jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
 
     for sub_id in jit_maker_config.sub_accounts:
@@ -344,17 +334,17 @@ async def main():
 
     await jit_maker.init()
 
-    await jit_maker.start_interval_loop(10_000)
+    await jit_maker.start_interval_loop(120_000)
     await asyncio.sleep(30)
     print(await jit_maker.health_check())
     await jit_maker.reset()
 
     # quick & dirty way to keep event loop open
-    # try:
-    #     while True:
-    #         await asyncio.sleep(3600)
-    # except asyncio.CancelledError:
-    #     pass
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        pass
 
     print("Hello world")
 
