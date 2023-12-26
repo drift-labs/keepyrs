@@ -24,6 +24,7 @@ from driftpy.dlob.client_types import DLOBClientConfig
 from driftpy.types import MarketType
 from driftpy.constants.config import DriftEnv
 from driftpy.keypair import load_keypair
+from driftpy.constants.numeric_constants import BASE_PRECISION
 
 from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
 from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
@@ -36,10 +37,13 @@ from keepyr_utils import (
     get_best_limit_bid_exclusionary,
 )
 
-from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile, place_resting_orders  # type: ignore
+from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile, place_resting_orders, rebalance  # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+TARGET_LEVERAGE_PER_ACCOUNT = 1
+BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1
 
 
 class JitMaker(Bot):
@@ -89,7 +93,7 @@ class JitMaker(Bot):
         await self.slot_subscriber.subscribe()
         await self.dlob_client.subscribe()
 
-        self.lookup_tables = await self.drift_client.fetch_market_lookup_table()
+        self.lookup_tables = [await self.drift_client.fetch_market_lookup_table()]
 
         logger.info(f"Initialized {self.name}")
 
@@ -150,6 +154,12 @@ class JitMaker(Bot):
 
                     num_markets_for_subaccount = len(
                         [num for num in self.sub_accounts if num == sub_id]
+                    )
+
+                    max_base = calculate_base_amount_to_mm(
+                        perp_market_account,
+                        drift_user.get_net_spot_market_value(None),
+                        TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount,
                     )
 
                     # check whether or not maker hedges
@@ -218,6 +228,54 @@ class JitMaker(Bot):
                         oracle_price_data,
                         (best_bid_price + best_ask_price) // 2,
                     )
+
+                    bid_offset = best_bid_price - oracle_price_data.price
+                    ask_offset = best_ask_price - oracle_price_data.price
+
+                    new_perp_params = JitParams(
+                        bid_offset,
+                        ask_offset,
+                        (-max_base // 20) * BASE_PRECISION,
+                        (max_base // 20) * BASE_PRECISION,
+                        PriceType.Oracle(),
+                        sub_id,
+                    )
+                    self.jitter.update_perp_params(perp_idx, new_perp_params)
+
+                    if spot_idx != 0:
+                        spot_market_account = self.drift_client.get_spot_market_account(
+                            spot_idx
+                        )
+
+                        spot_market_precision = 10**spot_market_account.decimals
+
+                        new_spot_params = JitParams(
+                            min(bid_offset, -1),
+                            max(ask_offset, 1),
+                            (-max_base // 20) * spot_market_precision,
+                            (max_base // 20) * spot_market_precision,
+                            PriceType.Oracle(),
+                            sub_id,
+                        )
+
+                        self.jitter.update_spot_params(spot_idx, new_spot_params)
+
+                        if (
+                            self.drift_client.active_sub_account_id
+                            == self.sub_accounts[i]
+                        ):
+                            max_size = 200
+                            if spot_idx == 1:
+                                max_size *= 2
+
+                            await rebalance(
+                                self.drift_client,
+                                drift_user,
+                                perp_idx,
+                                spot_idx,
+                                max_size,
+                                max_base * BASE_PCT_DEVIATION_BEFORE_HEDGE,
+                            )
 
                 await asyncio.sleep(10)
 

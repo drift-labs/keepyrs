@@ -1,8 +1,18 @@
+import asyncio
+import json
+import math
 import time
 import logging
+from typing import Optional
+import requests
+import base64
+
+from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
 
 from driftpy.drift_client import DriftClient
+from driftpy.drift_user import DriftUser
 from driftpy.types import (
+    is_variant,
     PerpMarketAccount,
     OraclePriceData,
     MarketType,
@@ -15,14 +25,20 @@ from driftpy.constants.numeric_constants import (
     PRICE_PRECISION,
     QUOTE_PRECISION,
     PERCENTAGE_PRECISION,
+    BASE_PRECISION,
 )
 from driftpy.math.conversion import convert_to_number
+from driftpy.math.spot_position import get_signed_token_amount, get_token_amount
 
 from keepyr_utils import round_down_to_nearest, decode_name
 
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+JUPITER_URL = "https://quote-api.jup.ag/v6"
+JUPITER_SLIPPAGE_BPS = 10
+# this is the slippage away from oracle that we're willing to tolerate
+JUPITER_ORACLE_SLIPPAGE_BPS = 50
 
 
 async def place_resting_orders(
@@ -48,7 +64,7 @@ async def place_resting_orders(
             market_type=MarketType.Perp(),
             base_asset_amount=perp_market_account.amm.order_step_size * 5,
             oracle_price_offset=mark_offset
-            - (perp_market_account.amm.order_tick_size * 15),
+            - (perp_market_account.amm.order_tick_size * 15),  # limit bid below oracle
             post_only=PostOnlyParams.TryPostOnly(),
             max_ts=int(now) + (60 * 5),
         ),
@@ -60,7 +76,10 @@ async def place_resting_orders(
             base_asset_amount=perp_market_account.amm.order_step_size * 5,
             oracle_price_offset=max(
                 PRICE_PRECISION // 150,
-                mark_offset + (perp_market_account.amm.order_tick_size * 15),
+                mark_offset
+                + (
+                    perp_market_account.amm.order_tick_size * 15
+                ),  # limit bid below oracle
             ),
             post_only=PostOnlyParams.TryPostOnly(),
         ),
@@ -135,3 +154,241 @@ def is_market_volatile(
         or c_vs_t_percentage > volatile_threshold
         or c_vs_l_percentage > volatile_threshold
     )
+
+
+async def rebalance(
+    drift_client: DriftClient,
+    user: DriftUser,
+    perp_idx: int,
+    spot_idx: int,
+    max_dollar_size: int = 0,
+    base_delta_b4_hedge: float = 0,
+    lookup_tables: Optional[list] = None,
+):
+    perp_market_account = drift_client.get_perp_market_account(perp_idx)
+    spot_market_account = drift_client.get_spot_market_account(spot_idx)
+
+    user_spot_position = user.get_spot_position(spot_idx)
+
+    if perp_market_account is None or spot_market_account is None:
+        logger.error(f"perp market {perp_idx} or spot market {spot_idx} not found")
+        raise ValueError(f"perp market {perp_idx} or spot market {spot_idx} not found")
+
+    assert str(perp_market_account.amm.oracle) == str(spot_market_account.oracle)
+
+    perp_size = user.get_perp_position_with_lp_settle(perp_idx)[0].base_asset_amount
+
+    spot_size = 0
+
+    if user_spot_position is not None:
+        spot_size = get_signed_token_amount(
+            get_token_amount(
+                user_spot_position.scaled_balance,
+                spot_market_account,
+                user_spot_position.balance_type,
+            ),
+            user_spot_position.balance_type,
+        )
+
+    spot_precision = 10**spot_market_account.decimals
+    spot_size_num = convert_to_number(spot_size, spot_precision)
+    perp_size_num = convert_to_number(perp_size, BASE_PRECISION)
+    mismatch = perp_size_num + spot_size_num
+    mismatch_threshold = base_delta_b4_hedge
+
+    last_oracle_price = convert_to_number(
+        perp_market_account.amm.historical_oracle_data.last_oracle_price,
+        PRICE_PRECISION,
+    )
+
+    if (
+        abs(mismatch) > abs(mismatch_threshold)
+        and abs(mismatch * last_oracle_price) > 10
+    ):
+        direction = (
+            PositionDirection.Long() if mismatch < 0 else PositionDirection.Short()
+        )
+
+        trade_size = abs(mismatch) * BASE_PRECISION
+
+        if max_dollar_size != 0:
+            trade_size = min(
+                max_dollar_size
+                // (
+                    perp_market_account.amm.historical_oracle_data.last_oracle_price
+                    // 1e6
+                )
+                * BASE_PRECISION,
+                trade_size,
+            )
+
+            trade_size_usd = convert_to_number(
+                trade_size
+                * perp_market_account.amm.historical_oracle_data.last_oracle_price
+                // BASE_PRECISION,
+                PRICE_PRECISION,
+            )
+
+            if perp_idx != 0:
+                trade_size //= 10
+
+            try:
+                instructions = await spot_hedge(
+                    spot_idx,
+                    drift_client,
+                    trade_size,
+                    (trade_size_usd * QUOTE_PRECISION * 1.001),
+                    direction,
+                    last_oracle_price,
+                )
+                if instructions:
+                    drift_lookup_tables = (
+                        lookup_tables if lookup_tables is not None else []
+                    )
+                    lookup_tables = drift_lookup_tables + instructions[1]
+                    if lookup_tables is None:
+                        lookup_tables = []
+                    sig = await send_rebalance_tx(
+                        drift_client, instructions[0], lookup_tables
+                    )
+                    if sig:
+                        logger.info(f"rebalance tx sig: https://solscan.io/tx/{sig}")
+
+            except Exception as e:
+                logger.error(f"Error hedging: {e}")
+
+
+async def spot_hedge(
+    spot_idx: int,
+    drift_client: DriftClient,
+    trade_size: int,
+    trade_size_usd: int,
+    direction: PositionDirection,
+    oracle_price: int,
+):
+    if is_variant(direction, "Long"):
+        # sell usdc, buy spot_idx
+        in_market_idx = 0
+        out_market_idx = spot_idx
+        size = trade_size
+    else:
+        # sell spot_idx, buy usdc
+        in_market_idx = spot_idx
+        out_market_idx = 0
+        size = trade_size_usd
+
+    in_market = drift_client.get_spot_market_account(in_market_idx)
+    out_market = drift_client.get_spot_market_account(out_market_idx)
+
+    if in_market is None or out_market is None:
+        raise ValueError(
+            f"in_market {in_market_idx} or out_market {out_market_idx} not found"
+        )
+
+    in_market_precision = 10**in_market.decimals
+    out_market_precision = 10**out_market.decimals
+
+    logger.info(
+        f"Jupiter swap: {str(direction)}: {size}, in_market: {in_market_idx}, out_market: {out_market_idx}"
+    )
+
+    url = f"{JUPITER_URL}?inputMint={str(in_market.mint)}&outputMint={str(out_market.mint)}&amount={size}&slippageBps={JUPITER_SLIPPAGE_BPS}"
+
+    quote_resp = requests.get(url)
+
+    if quote_resp.status_code != 200:
+        logger.error(
+            f"failed to get quote with params inputMint: {in_market.mint}, outputMint: {out_market.mint}, amount: {size}, slippageBps: {JUPITER_SLIPPAGE_BPS}"
+        )
+        return None
+
+    quote = quote_resp.json()
+
+    in_amount_num = convert_to_number(quote.inAmount, in_market_precision)
+    out_amount_num = convert_to_number(quote.outAmount, out_market_precision)
+
+    if is_variant(direction, "Long"):
+        # in usdc, out spot
+        # swap price = in / out
+        swap_price = in_amount_num / out_amount_num
+
+        # tolerable buys are JUPITER_SLIPPAGE_BPS above oracle price
+        tolerable_price = swap_price < oracle_price * (
+            1 + JUPITER_ORACLE_SLIPPAGE_BPS / 10_000
+        )
+        from_oracle_bps = (swap_price / oracle_price - 1) * 10_000
+    else:
+        # in spot, out usdc
+        # swap price = out / in
+        swap_price = out_amount_num / in_amount_num
+
+        # tolerable buys are JUPITER_SLIPPAGE_BPS below oracle price
+        tolerable_price = swap_price > oracle_price * (
+            1 - JUPITER_ORACLE_SLIPPAGE_BPS / 10_000
+        )
+        from_oracle_bps = (swap_price / oracle_price - 1) * 10_000
+
+    if not tolerable_price:
+        logger.warning(
+            f"Not swapping spot markets {in_market_idx} -> {out_market_idx}, "
+            f"amounts {in_amount_num} -> {out_amount_num}, swapPrice: {swap_price}, "
+            f"oracle: {oracle_price} (fromOracle: {from_oracle_bps} bps), decent ?: {tolerable_price}"
+        )
+        return None
+    else:
+        logger.info(
+            f"Swapping spot markets {in_market_idx} -> {out_market_idx}, "
+            f"amounts {in_amount_num} -> {out_amount_num}, swapPrice: {swap_price}, "
+            f"oracle: {oracle_price} (fromOracle: {from_oracle_bps} bps), decent ?: {tolerable_price}"
+        )
+
+        return await drift_client.get_jupiter_swap_ix_v6(
+            out_market_idx,
+            in_market_idx,
+            amount=size,
+            quote=quote,
+            slippage_bps=JUPITER_SLIPPAGE_BPS,
+        )
+
+
+async def send_rebalance_tx(
+    drift_client: DriftClient,
+    instructions: list,
+    lookup_tables: list,
+):
+    cu_estimate = 2_000_000
+
+    set_cu_limit_ix = set_compute_unit_limit(cu_estimate)
+    set_cu_price_ix = set_compute_unit_price(math.floor(1000 // (cu_estimate * 1e-6)))
+
+    ixs = [set_cu_limit_ix, set_cu_price_ix, *instructions]
+
+    try:
+        try:
+            versioned_tx = await asyncio.wait_for(
+                drift_client.tx_sender.get_versioned_tx(
+                    ixs=ixs,
+                    payer=drift_client.wallet.payer,
+                    lookup_tables=lookup_tables,
+                    additional_signers=None,
+                ),
+                timeout=10,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Timed out getting versioned tx for tx chunk")
+            return None
+
+        try:
+            sig = await asyncio.wait_for(
+                drift_client.program.provider.connection.send_transaction(
+                    versioned_tx, drift_client.wallet.payer
+                ),
+                timeout=5,
+            )
+
+            return sig.value
+        except asyncio.TimeoutError:
+            logger.error("Timed out sendig versioned transaction")
+            return None
+    except Exception as e:
+        logger.error(f"Failed to send rebalance tx: {e}")
