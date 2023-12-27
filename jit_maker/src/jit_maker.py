@@ -19,7 +19,7 @@ from driftpy.auction_subscriber.auction_subscriber import AuctionSubscriber
 from driftpy.auction_subscriber.types import AuctionSubscriberConfig
 from driftpy.user_map.user_map import UserMap
 from driftpy.user_map.user_map_config import UserMapConfig, WebsocketConfig
-from driftpy.dlob.dlob_client import DLOBClient
+from driftpy.dlob.dlob_subscriber import DLOBSubscriber
 from driftpy.dlob.client_types import DLOBClientConfig
 from driftpy.types import MarketType
 from driftpy.constants.config import DriftEnv
@@ -84,14 +84,14 @@ class JitMaker(Bot):
             self.drift_client, self.usermap, self.slot_subscriber, 30
         )
 
-        self.dlob_client = DLOBClient("https://dlob.drift.trade", dlob_config)
+        self.dlob_subscriber = DLOBSubscriber("https://dlob.drift.trade", dlob_config)
 
     async def init(self):
         logger.info(f"Initializing {self.name}")
 
         await self.drift_client.subscribe()
         await self.slot_subscriber.subscribe()
-        await self.dlob_client.subscribe()
+        await self.dlob_subscriber.subscribe()
 
         self.lookup_tables = [await self.drift_client.fetch_market_lookup_table()]
 
@@ -106,6 +106,9 @@ class JitMaker(Bot):
                 pass
         self.tasks.clear()
         logger.info(f"{self.name} reset complete")
+
+    def get_tasks(self):
+        return self.tasks
 
     async def start_interval_loop(self, interval_ms: int | None = 1000):
         async def interval_loop():
@@ -190,7 +193,7 @@ class JitMaker(Bot):
                     self.jitter.set_user_filter(user_filter)
 
                     best_bid = get_best_limit_bid_exclusionary(
-                        self.dlob_client.dlob,
+                        self.dlob_subscriber.dlob,
                         perp_market_account.market_index,
                         MarketType.Perp(),
                         oracle_price_data.slot,
@@ -199,7 +202,7 @@ class JitMaker(Bot):
                     )
 
                     best_ask = get_best_limit_ask_exclusionary(
-                        self.dlob_client.dlob,
+                        self.dlob_subscriber.dlob,
                         perp_market_account.market_index,
                         MarketType.Perp(),
                         oracle_price_data.slot,
@@ -212,22 +215,22 @@ class JitMaker(Bot):
                         return
 
                     best_bid_price = best_bid.get_price(
-                        oracle_price_data, self.dlob_client.slot_source.get_slot()
+                        oracle_price_data, self.dlob_subscriber.slot_source.get_slot()
                     )
 
                     best_ask_price = best_ask.get_price(
-                        oracle_price_data, self.dlob_client.slot_source.get_slot()
+                        oracle_price_data, self.dlob_subscriber.slot_source.get_slot()
                     )
 
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
-                    # await place_resting_orders(
-                    #     self.drift_client,
-                    #     perp_market_account,
-                    #     oracle_price_data,
-                    #     (best_bid_price + best_ask_price) // 2,
-                    # )
+                    await place_resting_orders(
+                        self.drift_client,
+                        perp_market_account,
+                        oracle_price_data,
+                        (best_bid_price + best_ask_price) // 2,
+                    )
 
                     logger.info("resting orders placed")
 
@@ -346,9 +349,10 @@ async def main():
     await jit_maker.init()
 
     await jit_maker.start_interval_loop(10_000)
-    # quick & dirty way to keep event loop open
-    await asyncio.sleep(3600)
-    print(await jit_maker.health_check())
+
+    await asyncio.gather(*jit_maker.get_tasks())
+
+    print(f"Healthy?: {await jit_maker.health_check()}")
     await jit_maker.reset()
 
     print("Hello world")
