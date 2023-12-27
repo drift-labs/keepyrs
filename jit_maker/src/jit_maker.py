@@ -1,4 +1,5 @@
 import asyncio
+import math
 import os
 import logging
 import time
@@ -92,6 +93,7 @@ class JitMaker(Bot):
         await self.drift_client.subscribe()
         await self.slot_subscriber.subscribe()
         await self.dlob_subscriber.subscribe()
+        await self.jitter.subscribe()
 
         self.lookup_tables = [await self.drift_client.fetch_market_lookup_table()]
 
@@ -225,32 +227,38 @@ class JitMaker(Bot):
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
-                    await place_resting_orders(
-                        self.drift_client,
-                        perp_market_account,
-                        oracle_price_data,
-                        (best_bid_price + best_ask_price) // 2,
-                    )
+                    # await place_resting_orders(
+                    #     self.drift_client,
+                    #     perp_market_account,
+                    #     oracle_price_data,
+                    #     (best_bid_price + best_ask_price) // 2,
+                    # )
 
                     logger.info("resting orders placed")
 
-                    bid_offset = best_bid_price - oracle_price_data.price
-                    ask_offset = best_ask_price - oracle_price_data.price
+                    logger.info(f"oracle price: {oracle_price_data.price}")
+
+                    bid_offset = math.floor(
+                        best_bid_price - (0.99 * oracle_price_data.price)
+                    )
+                    ask_offset = math.floor(
+                        best_ask_price - (1.01 * oracle_price_data.price)
+                    )
 
                     logger.info(f"max_base: {max_base}")
 
                     new_perp_params = JitParams(
                         bid=bid_offset,
                         ask=ask_offset,
-                        min_position=(-max_base / 20) * BASE_PRECISION,
-                        max_position=(max_base / 20) * BASE_PRECISION,
+                        min_position=math.floor((-max_base / 20) * BASE_PRECISION),
+                        max_position=math.floor((max_base / 20) * BASE_PRECISION),
                         price_type=PriceType.Oracle(),
                         sub_account_id=sub_id,
                     )
 
                     self.jitter.update_perp_params(perp_idx, new_perp_params)
                     logger.info(
-                        f"jitter perp params updated, bid: {new_perp_params.bid}, ask: {new_perp_params.ask} "
+                        f"jitter perp params updated, market_index: {perp_idx}, bid: {new_perp_params.bid}, ask: {new_perp_params.ask} "
                         f"min_position: {new_perp_params.min_position}, max_position: {new_perp_params.max_position}"
                     )
 
@@ -264,15 +272,19 @@ class JitMaker(Bot):
                         new_spot_params = JitParams(
                             bid=min(bid_offset, -1),
                             ask=max(ask_offset, 1),
-                            min_position=(-max_base / 20) * spot_market_precision,
-                            max_position=(max_base / 20) * spot_market_precision,
+                            min_position=math.floor(
+                                (-max_base / 20) * spot_market_precision
+                            ),
+                            max_position=math.floor(
+                                (max_base / 20) * spot_market_precision
+                            ),
                             price_type=PriceType.Oracle(),
                             sub_account_id=sub_id,
                         )
 
                         self.jitter.update_spot_params(spot_idx, new_spot_params)
                         logger.info(
-                            f"jitter spot params updated, bid: {new_spot_params.bid}, ask: {new_spot_params.ask} "
+                            f"jitter spot params updated, market_index: {spot_idx}, bid: {new_spot_params.bid}, ask: {new_spot_params.ask} "
                             f"min_position: {new_spot_params.min_position}, max_position: {new_spot_params.max_position}"
                         )
 

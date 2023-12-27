@@ -387,7 +387,7 @@ async def send_rebalance_tx(
 
             return sig.value
         except asyncio.TimeoutError:
-            logger.error("Timed out sendig versioned transaction")
+            logger.error("Timed out sending versioned transaction")
             return None
     except Exception as e:
         logger.error(f"Failed to send rebalance tx: {e}")
