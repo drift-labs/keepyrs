@@ -4,7 +4,7 @@ import logging
 import time
 
 from datetime import datetime
-from typing import Optional, Union
+from typing import Union
 from dotenv import load_dotenv
 
 from solana.rpc.async_api import AsyncClient
@@ -23,8 +23,8 @@ from driftpy.dlob.dlob_client import DLOBClient
 from driftpy.dlob.client_types import DLOBClientConfig
 from driftpy.types import MarketType
 from driftpy.constants.config import DriftEnv
-from driftpy.keypair import load_keypair
 from driftpy.constants.numeric_constants import BASE_PRECISION
+from driftpy.keypair import load_keypair
 
 from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
 from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
@@ -237,12 +237,12 @@ class JitMaker(Bot):
                     logger.info(f"max_base: {max_base}")
 
                     new_perp_params = JitParams(
-                        bid_offset,
-                        ask_offset,
-                        (-max_base / 20) * BASE_PRECISION,
-                        (max_base / 20) * BASE_PRECISION,
-                        PriceType.Oracle(),
-                        sub_id,
+                        bid=bid_offset,
+                        ask=ask_offset,
+                        min_position=(-max_base / 20) * BASE_PRECISION,
+                        max_position=(max_base / 20) * BASE_PRECISION,
+                        price_type=PriceType.Oracle(),
+                        sub_account_id=sub_id,
                     )
 
                     self.jitter.update_perp_params(perp_idx, new_perp_params)
@@ -259,12 +259,12 @@ class JitMaker(Bot):
                         spot_market_precision = 10**spot_market_account.decimals
 
                         new_spot_params = JitParams(
-                            min(bid_offset, -1),
-                            max(ask_offset, 1),
-                            (-max_base / 20) * spot_market_precision,
-                            (max_base / 20) * spot_market_precision,
-                            PriceType.Oracle(),
-                            sub_id,
+                            bid=min(bid_offset, -1),
+                            ask=max(ask_offset, 1),
+                            min_position=(-max_base / 20) * spot_market_precision,
+                            max_position=(max_base / 20) * spot_market_precision,
+                            price_type=PriceType.Oracle(),
+                            sub_account_id=sub_id,
                         )
 
                         self.jitter.update_spot_params(spot_idx, new_spot_params)
