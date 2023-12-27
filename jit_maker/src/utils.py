@@ -114,7 +114,7 @@ def calculate_base_amount_to_mm(
     target_leverage *= 0.95
     market_symbol = decode_name(perp_market_account.name)
 
-    max_base = (tc_normalized // base_price_normalized) * target_leverage
+    max_base = (tc_normalized / base_price_normalized) * target_leverage
 
     logger.info(
         f"(mkt index: {market_symbol}) base to market make (targetLvg={target_leverage}): "
@@ -292,7 +292,7 @@ async def spot_hedge(
         f"Jupiter swap: {str(direction)}: {size}, in_market: {in_market_idx}, out_market: {out_market_idx}"
     )
 
-    url = f"{JUPITER_URL}?inputMint={str(in_market.mint)}&outputMint={str(out_market.mint)}&amount={size}&slippageBps={JUPITER_SLIPPAGE_BPS}"
+    url = f"{JUPITER_URL}/?inputMint={str(in_market.mint)}&outputMint={str(out_market.mint)}&amount={size}&slippageBps={JUPITER_SLIPPAGE_BPS}"
 
     quote_resp = requests.get(url)
 

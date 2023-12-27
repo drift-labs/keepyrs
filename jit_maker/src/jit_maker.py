@@ -222,27 +222,34 @@ class JitMaker(Bot):
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
-                    await place_resting_orders(
-                        self.drift_client,
-                        perp_market_account,
-                        oracle_price_data,
-                        (best_bid_price + best_ask_price) // 2,
-                    )
+                    # await place_resting_orders(
+                    #     self.drift_client,
+                    #     perp_market_account,
+                    #     oracle_price_data,
+                    #     (best_bid_price + best_ask_price) // 2,
+                    # )
 
                     logger.info("resting orders placed")
 
                     bid_offset = best_bid_price - oracle_price_data.price
                     ask_offset = best_ask_price - oracle_price_data.price
 
+                    logger.info(f"max_base: {max_base}")
+
                     new_perp_params = JitParams(
                         bid_offset,
                         ask_offset,
-                        (-max_base // 20) * BASE_PRECISION,
-                        (max_base // 20) * BASE_PRECISION,
+                        (-max_base / 20) * BASE_PRECISION,
+                        (max_base / 20) * BASE_PRECISION,
                         PriceType.Oracle(),
                         sub_id,
                     )
+
                     self.jitter.update_perp_params(perp_idx, new_perp_params)
+                    logger.info(
+                        f"jitter perp params updated, bid: {new_perp_params.bid}, ask: {new_perp_params.ask} "
+                        f"min_position: {new_perp_params.min_position}, max_position: {new_perp_params.max_position}"
+                    )
 
                     if spot_idx != 0:
                         spot_market_account = self.drift_client.get_spot_market_account(
@@ -254,13 +261,17 @@ class JitMaker(Bot):
                         new_spot_params = JitParams(
                             min(bid_offset, -1),
                             max(ask_offset, 1),
-                            (-max_base // 20) * spot_market_precision,
-                            (max_base // 20) * spot_market_precision,
+                            (-max_base / 20) * spot_market_precision,
+                            (max_base / 20) * spot_market_precision,
                             PriceType.Oracle(),
                             sub_id,
                         )
 
                         self.jitter.update_spot_params(spot_idx, new_spot_params)
+                        logger.info(
+                            f"jitter spot params updated, bid: {new_spot_params.bid}, ask: {new_spot_params.ask} "
+                            f"min_position: {new_spot_params.min_position}, max_position: {new_spot_params.max_position}"
+                        )
 
                         if (
                             self.drift_client.active_sub_account_id
@@ -334,17 +345,11 @@ async def main():
 
     await jit_maker.init()
 
-    await jit_maker.start_interval_loop(120_000)
-    await asyncio.sleep(30)
+    await jit_maker.start_interval_loop(10_000)
+    # quick & dirty way to keep event loop open
+    await asyncio.sleep(3600)
     print(await jit_maker.health_check())
     await jit_maker.reset()
-
-    # quick & dirty way to keep event loop open
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except asyncio.CancelledError:
-        pass
 
     print("Hello world")
 
