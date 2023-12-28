@@ -227,12 +227,12 @@ class JitMaker(Bot):
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
-                    # await place_resting_orders(
-                    #     self.drift_client,
-                    #     perp_market_account,
-                    #     oracle_price_data,
-                    #     (best_bid_price + best_ask_price) // 2,
-                    # )
+                    await place_resting_orders(
+                        self.drift_client,
+                        perp_market_account,
+                        oracle_price_data,
+                        (best_bid_price + best_ask_price) // 2,
+                    )
 
                     logger.info("resting orders placed")
 
@@ -349,7 +349,7 @@ async def main():
         Pubkey.from_string("J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP"),
     )
 
-    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client)
+    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
 
