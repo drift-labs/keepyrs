@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-jit-proxy = {path = "/Users/frankfinnegan/Documents/musings/drift/jit-proxy/python"}
+jit-proxy = { git = "https://github.com/drift-labs/jit-proxy.git", branch = "master", subdirectory = "python"}
 python-dotenv = "^1.0.0"
 driftpy = "0.7.7"
 
