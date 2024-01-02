@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from typing import Union
 from dotenv import load_dotenv
+from aiohttp import web
 
 from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
@@ -324,6 +325,27 @@ class JitMaker(Bot):
                     self.watchdog_last_pat = time.time()
 
 
+def make_health_check_handler(jit_maker):
+    async def health_check_handler(request):
+        healthy = await jit_maker.health_check()
+        if healthy:
+            return web.Response(status=200)  # OK status for healthy
+        else:
+            return web.Response(status=503)  # Service Unavailable for unhealthy
+
+    return health_check_handler
+
+
+async def start_server(jit_maker):
+    app = web.Application()
+    health_handler = make_health_check_handler(jit_maker)
+    app.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "localhost", 8080)
+    await site.start()
+
+
 async def main():
     load_dotenv()
     secret = os.getenv("PRIVATE_KEY")
@@ -363,6 +385,8 @@ async def main():
     jit_maker = JitMaker(jit_maker_config, drift_client, usermap, jitter, "mainnet")
 
     await jit_maker.init()
+
+    server = asyncio.create_task(start_server(jit_maker))
 
     await jit_maker.start_interval_loop(10_000)
 
