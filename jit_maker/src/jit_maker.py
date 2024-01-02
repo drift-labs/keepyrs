@@ -227,14 +227,18 @@ class JitMaker(Bot):
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
+                    start_time = time.time()
                     await place_resting_orders(
                         self.drift_client,
                         perp_market_account,
                         oracle_price_data,
                         (best_bid_price + best_ask_price) // 2,
                     )
+                    end_time = time.time()
 
-                    logger.info("resting orders placed")
+                    logger.info(
+                        f"resting orders placed in {start_time - end_time} seconds"
+                    )
 
                     logger.info(f"oracle price: {oracle_price_data.price}")
 

@@ -2,8 +2,9 @@
 
 ## Set up
 
-1) Run `poetry install`
-2) Create `.env` file in `keepyrs` with wallet `PRIVATE_KEY` and your `RPC_URL`
+1) Run `poetry shell`
+2) Run `poetry install`
+3) Create `.env` file in `keepyrs` with wallet `PRIVATE_KEY` and your `RPC_URL`
 
 ## JIT MAKER
 
