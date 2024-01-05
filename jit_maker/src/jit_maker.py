@@ -92,9 +92,10 @@ class JitMaker(Bot):
         logger.info(f"Initializing {self.name}")
 
         await self.drift_client.subscribe()
+        await self.usermap.subscribe()
         await self.slot_subscriber.subscribe()
         await self.dlob_subscriber.subscribe()
-        await self.jitter.subscribe()
+        await asyncio.create_task(self.jitter.subscribe())
 
         self.lookup_tables = [await self.drift_client.fetch_market_lookup_table()]
 
@@ -228,18 +229,12 @@ class JitMaker(Bot):
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
-                    start_time = time.time()
-                    await place_resting_orders(
-                        self.drift_client,
-                        perp_market_account,
-                        oracle_price_data,
-                        (best_bid_price + best_ask_price) // 2,
-                    )
-                    end_time = time.time()
-
-                    logger.info(
-                        f"resting orders placed in {start_time - end_time} seconds"
-                    )
+                    # await place_resting_orders(
+                    #     self.drift_client,
+                    #     perp_market_account,
+                    #     oracle_price_data,
+                    #     (best_bid_price + best_ask_price) // 2,
+                    # )
 
                     logger.info(f"oracle price: {oracle_price_data.price}")
 
@@ -366,8 +361,6 @@ async def main():
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
     usermap = UserMap(usermap_config)
 
-    await usermap.subscribe()
-
     auction_subscriber = AuctionSubscriber(AuctionSubscriberConfig(drift_client))
 
     jit_proxy_client = JitProxyClient(
@@ -384,18 +377,13 @@ async def main():
 
     jit_maker = JitMaker(jit_maker_config, drift_client, usermap, jitter, "mainnet")
 
-    await jit_maker.init()
+    asyncio.create_task(start_server(jit_maker))
 
-    server = asyncio.create_task(start_server(jit_maker))
+    await jit_maker.init()
 
     await jit_maker.start_interval_loop(10_000)
 
     await asyncio.gather(*jit_maker.get_tasks())
-
-    print(f"Healthy?: {await jit_maker.health_check()}")
-    await jit_maker.reset()
-
-    print("Hello world")
 
 
 if __name__ == "__main__":
