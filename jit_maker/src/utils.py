@@ -137,10 +137,10 @@ def is_market_volatile(
     min_denom = min(current_price, last_price, twap_price)
 
     # Calculate current vs last and current vs twap, scaled by PRICE_PRECISION
-    c_vs_l = abs((current_price - last_price) * PRICE_PRECISION // min_denom)
-    c_vs_t = abs((current_price - twap_price) * PRICE_PRECISION // min_denom)
+    c_vs_l = abs(((current_price - last_price) * PRICE_PRECISION) // min_denom)
+    c_vs_t = abs(((current_price - twap_price) * PRICE_PRECISION) // min_denom)
 
-    recent_std = perp_market_account.amm.oracle_std * PRICE_PRECISION // min_denom
+    recent_std = (perp_market_account.amm.oracle_std * PRICE_PRECISION) // min_denom
 
     # Convert the values to percentages, scaled by PERCENTAGE_PRECISION
     c_vs_l_percentage = c_vs_l / PERCENTAGE_PRECISION
