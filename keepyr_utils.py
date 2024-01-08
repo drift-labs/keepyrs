@@ -68,6 +68,8 @@ def get_best_limit_ask_exclusionary(
 
 
 def round_down_to_nearest(num: float, nearest: float = 100.00):
+    if nearest == 0:
+        raise ValueError("cannot round down to nearest 0")
     return math.floor(num / nearest) * nearest
 
 

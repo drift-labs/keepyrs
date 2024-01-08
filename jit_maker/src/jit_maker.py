@@ -229,12 +229,12 @@ class JitMaker(Bot):
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
-                    # await place_resting_orders(
-                    #     self.drift_client,
-                    #     perp_market_account,
-                    #     oracle_price_data,
-                    #     (best_bid_price + best_ask_price) // 2,
-                    # )
+                    await place_resting_orders(
+                        self.drift_client,
+                        perp_market_account,
+                        oracle_price_data,
+                        (best_bid_price + best_ask_price) // 2,
+                    )
 
                     logger.info(f"oracle price: {oracle_price_data.price}")
 
@@ -337,7 +337,7 @@ async def start_server(jit_maker):
     app.router.add_get("/health", health_handler)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "localhost", 8080)
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
 
