@@ -21,7 +21,6 @@ def get_best_limit_bid_exclusionary(
     )
 
     for bid in bids:
-        print("processing bid")
         if hasattr(bid, "user_account"):
             if str(bid.user_account) == excluded_pubkey:
                 continue
@@ -52,7 +51,6 @@ def get_best_limit_ask_exclusionary(
     )
 
     for ask in asks:
-        print("processing bid")
         if hasattr(ask, "user_account"):
             if str(ask.user_account) == excluded_pubkey:
                 continue
@@ -70,6 +68,8 @@ def get_best_limit_ask_exclusionary(
 
 
 def round_down_to_nearest(num: int, nearest: int = 100):
+    if nearest == 0:
+        raise ValueError("Cannot round down to 0")
     return math.floor(num // nearest) * nearest
 
 

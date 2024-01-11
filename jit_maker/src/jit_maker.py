@@ -39,7 +39,7 @@ from keepyr_utils import (
     get_best_limit_bid_exclusionary,
 )
 
-from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile, place_resting_orders, rebalance  # type: ignore
+from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile, rebalance  # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -185,7 +185,9 @@ class JitMaker(Bot):
                         if is_market_volatile(
                             perp_market_account, oracle_price_data, 0.015  # 150 bps
                         ):
-                            logger.info("Skipping, market is volatile")
+                            logger.info(
+                                f"Skipping, Market: {perp_market_account.market_index} is volatile"
+                            )
                             skip = True
 
                         if skip:
@@ -228,19 +230,6 @@ class JitMaker(Bot):
                     logger.info(f"best bid price: {best_bid_price}")
                     logger.info(f"best ask price: {best_ask_price}")
 
-                    start_time = time.time()
-                    await place_resting_orders(
-                        self.drift_client,
-                        perp_market_account,
-                        oracle_price_data,
-                        (best_bid_price + best_ask_price) // 2,
-                    )
-                    end_time = time.time()
-
-                    logger.info(
-                        f"resting orders placed in {start_time - end_time} seconds"
-                    )
-
                     logger.info(f"oracle price: {oracle_price_data.price}")
 
                     bid_offset = math.floor(
@@ -255,8 +244,8 @@ class JitMaker(Bot):
                     new_perp_params = JitParams(
                         bid=bid_offset,
                         ask=ask_offset,
-                        min_position=math.floor((-max_base / 20) * BASE_PRECISION),
-                        max_position=math.floor((max_base / 20) * BASE_PRECISION),
+                        min_position=math.floor((-max_base) * BASE_PRECISION),
+                        max_position=math.floor((max_base) * BASE_PRECISION),
                         price_type=PriceType.Oracle(),
                         sub_account_id=sub_id,
                     )
@@ -278,11 +267,9 @@ class JitMaker(Bot):
                             bid=min(bid_offset, -1),
                             ask=max(ask_offset, 1),
                             min_position=math.floor(
-                                (-max_base / 20) * spot_market_precision
+                                (-max_base) * spot_market_precision
                             ),
-                            max_position=math.floor(
-                                (max_base / 20) * spot_market_precision
-                            ),
+                            max_position=math.floor((max_base) * spot_market_precision),
                             price_type=PriceType.Oracle(),
                             sub_account_id=sub_id,
                         )
@@ -384,9 +371,9 @@ async def main():
 
     jit_maker = JitMaker(jit_maker_config, drift_client, usermap, jitter, "mainnet")
 
-    await jit_maker.init()
+    asyncio.create_task(start_server(jit_maker))
 
-    server = asyncio.create_task(start_server(jit_maker))
+    await jit_maker.init()
 
     await jit_maker.start_interval_loop(10_000)
 

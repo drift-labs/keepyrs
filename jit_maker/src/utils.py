@@ -1,12 +1,17 @@
 import asyncio
+import base64
 import math
 import time
 import logging
+import traceback
 import requests
 
 from typing import Optional
 
 from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
+from solders.instruction import Instruction, AccountMeta
+from solders.pubkey import Pubkey
+from solders.address_lookup_table_account import AddressLookupTableAccount
 
 from driftpy.drift_client import DriftClient
 from driftpy.drift_user import DriftUser
@@ -14,11 +19,7 @@ from driftpy.types import (
     is_variant,
     PerpMarketAccount,
     OraclePriceData,
-    MarketType,
-    OrderParams,
-    OrderType,
     PositionDirection,
-    PostOnlyParams,
 )
 from driftpy.constants.numeric_constants import (
     PRICE_PRECISION,
@@ -28,6 +29,7 @@ from driftpy.constants.numeric_constants import (
 )
 from driftpy.math.conversion import convert_to_number
 from driftpy.math.spot_position import get_signed_token_amount, get_token_amount
+from driftpy.address_lookup_table import get_address_lookup_table
 
 from keepyr_utils import round_down_to_nearest, decode_name
 
@@ -40,51 +42,51 @@ JUPITER_SLIPPAGE_BPS = 10
 JUPITER_ORACLE_SLIPPAGE_BPS = 50
 
 
-async def place_resting_orders(
-    drift_client: DriftClient,
-    perp_market_account: PerpMarketAccount,
-    oracle_price_data: OraclePriceData,
-    mark_price: int,
-):
-    mark_offset = mark_price - oracle_price_data.price
+# async def place_resting_orders(
+#     drift_client: DriftClient,
+#     perp_market_account: PerpMarketAccount,
+#     oracle_price_data: OraclePriceData,
+#     mark_price: int,
+# ):
+#     mark_offset = mark_price - oracle_price_data.price
 
-    await drift_client.cancel_orders(
-        MarketType.Perp(),
-        perp_market_account.market_index,
-    )
+#     await drift_client.cancel_orders(
+#         MarketType.Perp(),
+#         perp_market_account.market_index,
+#     )
 
-    now = time.time()
+#     now = time.time()
 
-    params = [
-        OrderParams(
-            market_index=perp_market_account.market_index,
-            order_type=OrderType.Limit(),
-            direction=PositionDirection.Long(),
-            market_type=MarketType.Perp(),
-            base_asset_amount=perp_market_account.amm.order_step_size * 5,
-            oracle_price_offset=mark_offset
-            - (perp_market_account.amm.order_tick_size * 15),  # limit bid below oracle
-            post_only=PostOnlyParams.TryPostOnly(),
-            max_ts=int(now) + (60 * 5),
-        ),
-        OrderParams(
-            market_index=perp_market_account.market_index,
-            order_type=OrderType.Limit(),
-            direction=PositionDirection.Short(),
-            market_type=MarketType.Perp(),
-            base_asset_amount=perp_market_account.amm.order_step_size * 5,
-            oracle_price_offset=max(
-                PRICE_PRECISION // 150,
-                mark_offset
-                + (
-                    perp_market_account.amm.order_tick_size * 15
-                ),  # limit bid below oracle
-            ),
-            post_only=PostOnlyParams.TryPostOnly(),
-        ),
-    ]
+#     params = [
+#         OrderParams(
+#             market_index=perp_market_account.market_index,
+#             order_type=OrderType.Limit(),
+#             direction=PositionDirection.Long(),
+#             market_type=MarketType.Perp(),
+#             base_asset_amount=perp_market_account.amm.order_step_size * 5,
+#             oracle_price_offset=mark_offset
+#             - (perp_market_account.amm.order_tick_size * 15),  # limit bid below oracle
+#             post_only=PostOnlyParams.TryPostOnly(),
+#             max_ts=int(now) + (60 * 5),
+#         ),
+#         OrderParams(
+#             market_index=perp_market_account.market_index,
+#             order_type=OrderType.Limit(),
+#             direction=PositionDirection.Short(),
+#             market_type=MarketType.Perp(),
+#             base_asset_amount=perp_market_account.amm.order_step_size * 5,
+#             oracle_price_offset=max(
+#                 PRICE_PRECISION // 150,
+#                 mark_offset
+#                 + (
+#                     perp_market_account.amm.order_tick_size * 15
+#                 ),  # limit bid below oracle
+#             ),
+#             post_only=PostOnlyParams.TryPostOnly(),
+#         ),
+#     ]
 
-    await drift_client.place_orders(params)
+# await drift_client.place_orders(params)
 
 
 def calculate_base_amount_to_mm(
@@ -291,20 +293,20 @@ async def spot_hedge(
         f"Jupiter swap: {str(direction)}: {size}, in_market: {in_market_idx}, out_market: {out_market_idx}"
     )
 
-    url = f"{JUPITER_URL}/?inputMint={str(in_market.mint)}&outputMint={str(out_market.mint)}&amount={size}&slippageBps={JUPITER_SLIPPAGE_BPS}"
+    url = f"{JUPITER_URL}/quote?inputMint={str(in_market.mint)}&outputMint={str(out_market.mint)}&amount={math.floor(size)}&slippageBps={JUPITER_SLIPPAGE_BPS}"
 
     quote_resp = requests.get(url)
 
     if quote_resp.status_code != 200:
         logger.error(
-            f"failed to get quote with params inputMint: {in_market.mint}, outputMint: {out_market.mint}, amount: {size}, slippageBps: {JUPITER_SLIPPAGE_BPS}"
+            f"failed to get quote with params inputMint: {in_market.mint}, outputMint: {out_market.mint}, amount: {int(size)}, slippageBps: {JUPITER_SLIPPAGE_BPS}"
         )
         return None
 
     quote = quote_resp.json()
 
-    in_amount_num = convert_to_number(quote.inAmount, in_market_precision)
-    out_amount_num = convert_to_number(quote.outAmount, out_market_precision)
+    in_amount_num = convert_to_number(int(quote["inAmount"]), in_market_precision)
+    out_amount_num = convert_to_number(int(quote["outAmount"]), out_market_precision)
 
     if is_variant(direction, "Long"):
         # in usdc, out spot
@@ -344,7 +346,7 @@ async def spot_hedge(
         return await drift_client.get_jupiter_swap_ix_v6(
             out_market_idx,
             in_market_idx,
-            amount=size,
+            amount=math.floor(size),
             quote=quote,
             slippage_bps=JUPITER_SLIPPAGE_BPS,
         )
@@ -360,7 +362,23 @@ async def send_rebalance_tx(
     set_cu_limit_ix = set_compute_unit_limit(cu_estimate)
     set_cu_price_ix = set_compute_unit_price(math.floor(1000 // (cu_estimate * 1e-6)))
 
-    ixs = [set_cu_limit_ix, set_cu_price_ix, *instructions]
+    ixs: list[Instruction] = [set_cu_limit_ix, set_cu_price_ix]
+
+    for instruction in instructions:
+        if type(instruction) is list:
+            continue
+        elif type(instruction) is dict:
+            ix = dict_to_instructions(instruction)
+            ixs.append(ix)
+        else:
+            ixs.append(instruction)
+
+    lookup_table_accounts: list[AddressLookupTableAccount] = []
+    for table in lookup_tables:
+        lookup_table_account = await get_address_lookup_table(
+            drift_client.connection, Pubkey.from_string(table)
+        )
+        lookup_table_accounts.append(lookup_table_account)
 
     try:
         try:
@@ -368,7 +386,7 @@ async def send_rebalance_tx(
                 drift_client.tx_sender.get_versioned_tx(
                     ixs=ixs,
                     payer=drift_client.wallet.payer,
-                    lookup_tables=lookup_tables,
+                    lookup_tables=lookup_table_accounts,
                     additional_signers=None,
                 ),
                 timeout=10,
@@ -379,15 +397,48 @@ async def send_rebalance_tx(
 
         try:
             sig = await asyncio.wait_for(
-                drift_client.program.provider.connection.send_transaction(
-                    versioned_tx, drift_client.wallet.payer
-                ),
+                drift_client.tx_sender.send(versioned_tx),
                 timeout=5,
             )
 
-            return sig.value
+            return sig.tx_sig
         except asyncio.TimeoutError:
             logger.error("Timed out sending versioned transaction")
             return None
     except Exception as e:
-        logger.error(f"Failed to send rebalance tx: {e}")
+        tb = traceback.format_exc()
+        logger.error(f"Failed to send rebalance tx: {e}\n{tb}")
+
+
+def list_to_instructions(instructions_list: list) -> list[Instruction]:
+    instructions = []
+
+    for item in instructions_list:
+        program_id = Pubkey.from_string(item["programId"])
+        accounts = [
+            AccountMeta(
+                Pubkey.from_string(account["pubkey"]),
+                account["isSigner"],
+                account["isWritable"],
+            )
+            for account in item["accounts"]
+        ]
+        data = base64.b64decode(item["data"])
+        instruction = Instruction(program_id, data, accounts)
+        instructions.append(instruction)
+
+    return instructions
+
+
+def dict_to_instructions(instructions_dict: dict) -> Instruction:
+    program_id = Pubkey.from_string(instructions_dict["programId"])
+    accounts = [
+        AccountMeta(
+            Pubkey.from_string(account["pubkey"]),
+            account["isSigner"],
+            account["isWritable"],
+        )
+        for account in instructions_dict["accounts"]
+    ]
+    data = base64.b64decode(instructions_dict["data"])
+    return Instruction(program_id, data, accounts)
