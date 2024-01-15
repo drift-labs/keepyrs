@@ -44,7 +44,7 @@ from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile,
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 5
+TARGET_LEVERAGE_PER_ACCOUNT = 1
 BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1
 
 
@@ -402,7 +402,7 @@ async def main():
 
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
-    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0], False)
+    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
 
     for sub_id in jit_maker_config.sub_accounts:
         await drift_client.add_user(sub_id)
