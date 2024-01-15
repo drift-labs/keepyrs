@@ -45,7 +45,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TARGET_LEVERAGE_PER_ACCOUNT = 1
-BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1
 
 
 class JitMaker(Bot):
