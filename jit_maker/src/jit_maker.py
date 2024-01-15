@@ -44,7 +44,7 @@ from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 3
+TARGET_LEVERAGE_PER_ACCOUNT = 1
 BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1
 
 
