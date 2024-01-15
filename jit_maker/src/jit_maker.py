@@ -44,7 +44,7 @@ from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile,
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 1
+TARGET_LEVERAGE_PER_ACCOUNT = 2
 BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1
 
 
@@ -178,11 +178,19 @@ class JitMaker(Bot):
                         target_leverage,
                     )
 
+                    overlevered_long = False
+                    overlevered_short = False
                     if actual_leverage >= target_leverage:
                         logger.warning(
                             f"jit maker at or above max leverage actual: {actual_leverage} target: {target_leverage}"
                         )
-                        max_base = 0
+                        overlevered_base_asset_amount = drift_user.get_perp_position(
+                            perp_idx
+                        ).base_asset_amount
+                        if overlevered_base_asset_amount > 0:
+                            overlevered_long = True
+                        elif overlevered_base_asset_amount < 0:
+                            overlevered_short = True
 
                     # check whether or not maker hedges
                     match perp_idx:
@@ -215,7 +223,6 @@ class JitMaker(Bot):
 
                     best_bid = get_best_limit_bid_exclusionary(
                         self.dlob_subscriber.dlob,
-                        # self.dlob_client.dlob,
                         perp_market_account.market_index,
                         MarketType.Perp(),
                         oracle_price_data.slot,
@@ -225,7 +232,6 @@ class JitMaker(Bot):
 
                     best_ask = get_best_limit_ask_exclusionary(
                         self.dlob_subscriber.dlob,
-                        # self.dlob_client.dlob,
                         perp_market_account.market_index,
                         MarketType.Perp(),
                         oracle_price_data.slot,
@@ -259,24 +265,21 @@ class JitMaker(Bot):
 
                     logger.info(f"max_base: {max_base}")
 
+                    perp_min_position = math.floor((-max_base) * BASE_PRECISION)
+                    perp_max_position = math.floor((max_base) * BASE_PRECISION)
+                    if overlevered_long:
+                        perp_max_position = 0
+                    elif overlevered_short:
+                        perp_min_position = 0
+
                     new_perp_params = JitParams(
                         bid=bid_offset,
                         ask=ask_offset,
-                        min_position=math.floor((-max_base) * BASE_PRECISION),
-                        max_position=math.floor((max_base) * BASE_PRECISION),
+                        min_position=perp_min_position,
+                        max_position=perp_max_position,
                         price_type=PriceType.Oracle(),
                         sub_account_id=sub_id,
                     )
-
-                    # if overleveraged:
-                    #     new_perp_params = JitParams(
-                    #         bid=0,
-                    #         ask=0,
-                    #         min_position=0,
-                    #         max_position=0,
-                    #         price_type=PriceType.Oracle(),
-                    #         sub_account_id=sub_id,
-                    #     )
 
                     self.jitter.update_perp_params(perp_idx, new_perp_params)
                     logger.info(
@@ -291,26 +294,25 @@ class JitMaker(Bot):
 
                         spot_market_precision = 10**spot_market_account.decimals
 
+                        spot_min_position = math.floor(
+                            (-max_base) * spot_market_precision
+                        )
+                        spot_max_position = math.floor(
+                            (max_base) * spot_market_precision
+                        )
+                        if overlevered_long:
+                            spot_max_position = 0
+                        elif overlevered_short:
+                            spot_min_position = 0
+
                         new_spot_params = JitParams(
                             bid=min(bid_offset, -1),
                             ask=max(ask_offset, 1),
-                            min_position=math.floor(
-                                (-max_base) * spot_market_precision
-                            ),
-                            max_position=math.floor((max_base) * spot_market_precision),
+                            min_position=spot_min_position,
+                            max_position=spot_max_position,
                             price_type=PriceType.Oracle(),
                             sub_account_id=sub_id,
                         )
-
-                        # if overleveraged:
-                        #     new_spot_params = JitParams(
-                        #         bid=0,
-                        #         ask=0,
-                        #         min_position=0,
-                        #         max_position=0,
-                        #         price_type=PriceType.Oracle(),
-                        #         sub_account_id=sub_id,
-                        #     )
 
                         self.jitter.update_spot_params(spot_idx, new_spot_params)
                         logger.info(
@@ -402,7 +404,7 @@ async def main():
 
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
-    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
+    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0], False)
 
     for sub_id in jit_maker_config.sub_accounts:
         await drift_client.add_user(sub_id)
