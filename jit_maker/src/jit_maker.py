@@ -74,6 +74,7 @@ class JitMaker(Bot):
         self.dry_run = config.dry_run
         self.sub_accounts = config.sub_accounts
         self.perp_market_indexes = config.perp_market_indexes
+        self.spot = config.spot
 
         # Set up clients & subscriptions
         self.drift_client = drift_client
@@ -162,6 +163,10 @@ class JitMaker(Bot):
                         [num for num in self.sub_accounts if num == sub_id]
                     )
 
+                    if num_markets_for_subaccount == 0:
+                        logger.error(f"0 markets found for sub_account_id: {sub_id}")
+                        continue
+
                     max_base = calculate_base_amount_to_mm(
                         perp_market_account,
                         drift_user.get_net_spot_market_value(None),
@@ -199,6 +204,7 @@ class JitMaker(Bot):
 
                     best_bid = get_best_limit_bid_exclusionary(
                         self.dlob_subscriber.dlob,
+                        # self.dlob_client.dlob,
                         perp_market_account.market_index,
                         MarketType.Perp(),
                         oracle_price_data.slot,
@@ -208,6 +214,7 @@ class JitMaker(Bot):
 
                     best_ask = get_best_limit_ask_exclusionary(
                         self.dlob_subscriber.dlob,
+                        # self.dlob_client.dlob,
                         perp_market_account.market_index,
                         MarketType.Perp(),
                         oracle_price_data.slot,
@@ -256,7 +263,7 @@ class JitMaker(Bot):
                         f"min_position: {new_perp_params.min_position}, max_position: {new_perp_params.max_position}"
                     )
 
-                    if spot_idx != 0:
+                    if spot_idx != 0 and self.spot:
                         spot_market_account = self.drift_client.get_spot_market_account(
                             spot_idx
                         )
@@ -364,7 +371,7 @@ async def main():
 
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
-    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
+    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0], False)
 
     for sub_id in jit_maker_config.sub_accounts:
         await drift_client.add_user(sub_id)
