@@ -23,7 +23,7 @@ from driftpy.user_map.user_map import UserMap
 from driftpy.user_map.user_map_config import UserMapConfig, WebsocketConfig
 from driftpy.dlob.dlob_subscriber import DLOBSubscriber
 from driftpy.dlob.client_types import DLOBClientConfig
-from driftpy.types import is_variant, MarketType
+from driftpy.types import is_variant, MarketType, TxParams
 from driftpy.constants.config import DriftEnv
 from driftpy.constants.numeric_constants import BASE_PRECISION
 from driftpy.keypair import load_keypair
@@ -44,7 +44,7 @@ from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 1
+TARGET_LEVERAGE_PER_ACCOUNT = 5
 
 
 class JitMaker(Bot):
@@ -448,6 +448,7 @@ async def main():
         wallet,
         "mainnet",
         account_subscription=AccountSubscriptionConfig("websocket"),
+        tx_params=TxParams(600_000, 16),
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -465,24 +466,28 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig(
-        "jit maker", False, [0], [0], MarketType.Perp()
-    )
-
-    for sub_id in jit_maker_perp_config.sub_accounts:
-        await drift_client.add_user(sub_id)
-
-    jit_maker = JitMaker(
-        jit_maker_perp_config, drift_client, usermap, jitter, "mainnet"
-    )
-
-    # This is an example of a spot JIT maker that will JIT the SOL market
-    # jit_maker_spot_config = JitMakerConfig("jit maker", False, [1], [0], MarketType.Spot())
+    # jit_maker_perp_config = JitMakerConfig(
+    #     "jit maker", False, [0], [0], MarketType.Perp()
+    # )
 
     # for sub_id in jit_maker_perp_config.sub_accounts:
     #     await drift_client.add_user(sub_id)
 
-    # jit_maker = JitMaker(jit_maker_perp_config, drift_client, usermap, jitter, "mainnet")
+    # jit_maker = JitMaker(
+    #     jit_maker_perp_config, drift_client, usermap, jitter, "mainnet"
+    # )
+
+    # This is an example of a spot JIT maker that will JIT the SOL market
+    jit_maker_spot_config = JitMakerConfig(
+        "jit maker", False, [1], [0], MarketType.Spot()
+    )
+
+    for sub_id in jit_maker_spot_config.sub_accounts:
+        await drift_client.add_user(sub_id)
+
+    jit_maker = JitMaker(
+        jit_maker_spot_config, drift_client, usermap, jitter, "mainnet"
+    )
 
     asyncio.create_task(start_server(jit_maker))
 
