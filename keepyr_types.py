@@ -31,3 +31,4 @@ class BotConfig:
 class JitMakerConfig(BotConfig):
     perp_market_indexes: Optional[list[int]]
     sub_accounts: Optional[list[int]]
+    spot: bool = True  # Set to False if the maker should not hedge with spot

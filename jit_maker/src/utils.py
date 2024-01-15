@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import math
-import time
 import logging
 import traceback
 import requests
@@ -40,53 +39,6 @@ JUPITER_URL = "https://quote-api.jup.ag/v6"
 JUPITER_SLIPPAGE_BPS = 10
 # this is the slippage away from oracle that we're willing to tolerate
 JUPITER_ORACLE_SLIPPAGE_BPS = 50
-
-
-# async def place_resting_orders(
-#     drift_client: DriftClient,
-#     perp_market_account: PerpMarketAccount,
-#     oracle_price_data: OraclePriceData,
-#     mark_price: int,
-# ):
-#     mark_offset = mark_price - oracle_price_data.price
-
-#     await drift_client.cancel_orders(
-#         MarketType.Perp(),
-#         perp_market_account.market_index,
-#     )
-
-#     now = time.time()
-
-#     params = [
-#         OrderParams(
-#             market_index=perp_market_account.market_index,
-#             order_type=OrderType.Limit(),
-#             direction=PositionDirection.Long(),
-#             market_type=MarketType.Perp(),
-#             base_asset_amount=perp_market_account.amm.order_step_size * 5,
-#             oracle_price_offset=mark_offset
-#             - (perp_market_account.amm.order_tick_size * 15),  # limit bid below oracle
-#             post_only=PostOnlyParams.TryPostOnly(),
-#             max_ts=int(now) + (60 * 5),
-#         ),
-#         OrderParams(
-#             market_index=perp_market_account.market_index,
-#             order_type=OrderType.Limit(),
-#             direction=PositionDirection.Short(),
-#             market_type=MarketType.Perp(),
-#             base_asset_amount=perp_market_account.amm.order_step_size * 5,
-#             oracle_price_offset=max(
-#                 PRICE_PRECISION // 150,
-#                 mark_offset
-#                 + (
-#                     perp_market_account.amm.order_tick_size * 15
-#                 ),  # limit bid below oracle
-#             ),
-#             post_only=PostOnlyParams.TryPostOnly(),
-#         ),
-#     ]
-
-# await drift_client.place_orders(params)
 
 
 def calculate_base_amount_to_mm(

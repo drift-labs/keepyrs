@@ -67,12 +67,12 @@ def get_best_limit_ask_exclusionary(
     return None
 
 
-def round_down_to_nearest(num: int, nearest: int = 100):
+def round_down_to_nearest(num: int, nearest: int = 100) -> int:
     if nearest == 0:
-        raise ValueError("Cannot round down to 0")
-    return math.floor(num // nearest) * nearest
+        return num  # we will just return the number if asked to round to 0
+    return math.floor(num / nearest) * nearest
 
 
-def decode_name(bytes_list: list[int]):
+def decode_name(bytes_list: list[int]) -> str:
     byte_array = bytes(bytes_list)
     return byte_array.decode("utf-8").strip()
