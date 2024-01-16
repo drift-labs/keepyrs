@@ -9,3 +9,5 @@
 ## JIT MAKER
 
 `poetry run python -m jit_maker.src.jit_maker`
+
+You CANNOT make multiple markets with the same sub account on the JIT Maker.  This code does not account for overleveraging as a result of having positions open across several markets on the same sub account id. 

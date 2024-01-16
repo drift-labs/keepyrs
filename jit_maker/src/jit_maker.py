@@ -44,7 +44,7 @@ from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 1
+TARGET_LEVERAGE_PER_ACCOUNT = 5
 
 
 class JitMaker(Bot):
@@ -90,6 +90,14 @@ class JitMaker(Bot):
 
     async def init(self):
         logger.info(f"Initializing {self.name}")
+
+        # check for duplicate sub_account_ids
+        init_len = len(self.sub_accounts)
+        dedup_len = len(list(set(self.sub_accounts)))
+        if init_len != dedup_len:
+            raise ValueError(
+                "You CANNOT make multiple markets with the same sub account id"
+            )
 
         await self.drift_client.subscribe()
         await self.slot_subscriber.subscribe()
