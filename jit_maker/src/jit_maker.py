@@ -44,7 +44,7 @@ from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 5
+TARGET_LEVERAGE_PER_ACCOUNT = 1
 
 
 class JitMaker(Bot):
@@ -466,28 +466,28 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    # jit_maker_perp_config = JitMakerConfig(
-    #     "jit maker", False, [0], [0], MarketType.Perp()
-    # )
-
-    # for sub_id in jit_maker_perp_config.sub_accounts:
-    #     await drift_client.add_user(sub_id)
-
-    # jit_maker = JitMaker(
-    #     jit_maker_perp_config, drift_client, usermap, jitter, "mainnet"
-    # )
-
-    # This is an example of a spot JIT maker that will JIT the SOL market
-    jit_maker_spot_config = JitMakerConfig(
-        "jit maker", False, [1], [0], MarketType.Spot()
+    jit_maker_perp_config = JitMakerConfig(
+        "jit maker", False, [0], [0], MarketType.Perp()
     )
 
-    for sub_id in jit_maker_spot_config.sub_accounts:
+    for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
 
     jit_maker = JitMaker(
-        jit_maker_spot_config, drift_client, usermap, jitter, "mainnet"
+        jit_maker_perp_config, drift_client, usermap, jitter, "mainnet"
     )
+
+    # This is an example of a spot JIT maker that will JIT the SOL market
+    # jit_maker_spot_config = JitMakerConfig(
+    #     "jit maker", False, [1], [0], MarketType.Spot()
+    # )
+
+    # for sub_id in jit_maker_spot_config.sub_accounts:
+    #     await drift_client.add_user(sub_id)
+
+    # jit_maker = JitMaker(
+    #     jit_maker_spot_config, drift_client, usermap, jitter, "mainnet"
+    # )
 
     asyncio.create_task(start_server(jit_maker))
 
