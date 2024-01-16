@@ -460,7 +460,7 @@ async def main():
         wallet,
         "mainnet",
         account_subscription=AccountSubscriptionConfig("websocket"),
-        tx_params=TxParams(600_000, 16),  # crank priority fees way up
+        tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -475,7 +475,7 @@ async def main():
         Pubkey.from_string("J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP"),
     )
 
-    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
+    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, False)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
     jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())

@@ -27,19 +27,9 @@ def calculate_base_amount_to_mm_perp(
         perp_market_account.amm.historical_oracle_data.last_oracle_price_twap
     )
 
-    base_price_normalized_tick = base_price_normalized
-    while base_price_normalized_tick > 100:
-        base_price_normalized_tick //= 10
+    tc_normalized = convert_to_number(net_spot_market_value, QUOTE_PRECISION)
 
-    tc_normalized = min(
-        round_down_to_nearest(
-            convert_to_number(net_spot_market_value, QUOTE_PRECISION),
-            base_price_normalized_tick,
-        ),
-        800_000,  # hard coded limit
-    )
-
-    logger.info(f" {net_spot_market_value} -> {tc_normalized}")
+    logger.info(f"{net_spot_market_value} -> {tc_normalized}")
 
     target_leverage *= 0.95
     market_symbol = decode_name(perp_market_account.name)
@@ -63,17 +53,7 @@ def calculate_base_amount_to_mm_spot(
         spot_market_account.historical_oracle_data.last_oracle_price_twap
     )
 
-    base_price_normalized_tick = base_price_normalized
-    while base_price_normalized_tick > 100:
-        base_price_normalized_tick //= 10
-
-    tc_normalized = min(
-        round_down_to_nearest(
-            convert_to_number(net_spot_market_value, QUOTE_PRECISION),
-            base_price_normalized_tick,
-        ),
-        800_000,  # hard coded limit
-    )
+    tc_normalized = convert_to_number(net_spot_market_value, QUOTE_PRECISION)
 
     logger.info(f" {net_spot_market_value} -> {tc_normalized}")
 
