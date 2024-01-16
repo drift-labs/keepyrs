@@ -23,7 +23,7 @@ from driftpy.user_map.user_map import UserMap
 from driftpy.user_map.user_map_config import UserMapConfig, WebsocketConfig
 from driftpy.dlob.dlob_subscriber import DLOBSubscriber
 from driftpy.dlob.client_types import DLOBClientConfig
-from driftpy.types import MarketType
+from driftpy.types import is_variant, MarketType, TxParams
 from driftpy.constants.config import DriftEnv
 from driftpy.constants.numeric_constants import BASE_PRECISION
 from driftpy.keypair import load_keypair
@@ -39,13 +39,12 @@ from keepyr_utils import (
     get_best_limit_bid_exclusionary,
 )
 
-from jit_maker.src.utils import calculate_base_amount_to_mm, is_market_volatile, rebalance  # type: ignore
+from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base_amount_to_mm_spot, is_perp_market_volatile, is_spot_market_volatile  # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TARGET_LEVERAGE_PER_ACCOUNT = 1
-BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1
 
 
 class JitMaker(Bot):
@@ -71,10 +70,9 @@ class JitMaker(Bot):
 
         # Set up attributes from config
         self.name = config.bot_id
-        self.dry_run = config.dry_run
-        self.sub_accounts = config.sub_accounts
-        self.perp_market_indexes = config.perp_market_indexes
-        self.spot = config.spot
+        self.sub_accounts: list[int] = config.sub_accounts  # type: ignore
+        self.market_indexes: list[int] = config.market_indexes  # type: ignore
+        self.market_type = config.market_type
 
         # Set up clients & subscriptions
         self.drift_client = drift_client
@@ -87,10 +85,23 @@ class JitMaker(Bot):
             self.drift_client, self.usermap, self.slot_subscriber, 30
         )
 
-        self.dlob_subscriber = DLOBSubscriber("https://dlob.drift.trade", dlob_config)
+        self.dlob_subscriber = DLOBSubscriber(config=dlob_config)
 
     async def init(self):
         logger.info(f"Initializing {self.name}")
+
+        # check for duplicate sub_account_ids
+        init_len = len(self.sub_accounts)
+        dedup_len = len(list(set(self.sub_accounts)))
+        if init_len != dedup_len:
+            raise ValueError(
+                "You CANNOT make multiple markets with the same sub account id"
+            )
+
+        # check to make sure 1:1 unique sub account id to market index ratio
+        market_len = len(self.market_indexes)
+        if dedup_len != market_len:
+            raise ValueError("You must have 1 sub account id per market to jit")
 
         await self.drift_client.subscribe()
         await self.slot_subscriber.subscribe()
@@ -144,196 +155,11 @@ class JitMaker(Bot):
                     f"{datetime.fromtimestamp(start).isoformat()} running jit periodic tasks"
                 )
 
-                for i in range(len(self.perp_market_indexes)):
-                    perp_idx = self.perp_market_indexes[i]
-                    sub_id = self.sub_accounts[i]
-                    self.drift_client.switch_active_user(sub_id)
-
-                    drift_user = self.drift_client.get_user(sub_id)
-                    perp_market_account = self.drift_client.get_perp_market_account(
-                        perp_idx
-                    )
-                    oracle_price_data = (
-                        self.drift_client.get_oracle_price_data_for_perp_market(
-                            perp_idx
-                        )
-                    )
-
-                    num_markets_for_subaccount = len(
-                        [num for num in self.sub_accounts if num == sub_id]
-                    )
-
-                    if num_markets_for_subaccount == 0:
-                        logger.error(f"0 markets found for sub_account_id: {sub_id}")
-                        continue
-
-                    target_leverage = (
-                        TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
-                    )
-                    actual_leverage = drift_user.get_leverage() / 10_000
-
-                    max_base = calculate_base_amount_to_mm(
-                        perp_market_account,
-                        drift_user.get_net_spot_market_value(None),
-                        target_leverage,
-                    )
-
-                    if actual_leverage >= target_leverage:
-                        logger.warning(
-                            f"jit maker at or above max leverage actual: {actual_leverage} target: {target_leverage}"
-                        )
-                        max_base = 0
-
-                    # check whether or not maker hedges
-                    match perp_idx:
-                        case 0:
-                            spot_idx = 1
-                        case 1:
-                            spot_idx = 3
-                        case 2:
-                            spot_idx = 4
-                        case _:
-                            spot_idx = 0
-
-                    def user_filter(user_account, user_key: str, order) -> bool:
-                        skip = user_key == str(drift_user.user_public_key)
-
-                        if is_market_volatile(
-                            perp_market_account, oracle_price_data, 0.015  # 150 bps
-                        ):
-                            logger.info(
-                                f"Skipping, Market: {perp_market_account.market_index} is volatile"
-                            )
-                            skip = True
-
-                        if skip:
-                            logger.info(f"Skipping user: {user_key}")
-
-                        return skip
-
-                    self.jitter.set_user_filter(user_filter)
-
-                    best_bid = get_best_limit_bid_exclusionary(
-                        self.dlob_subscriber.dlob,
-                        # self.dlob_client.dlob,
-                        perp_market_account.market_index,
-                        MarketType.Perp(),
-                        oracle_price_data.slot,
-                        oracle_price_data,
-                        str(drift_user.user_public_key),
-                    )
-
-                    best_ask = get_best_limit_ask_exclusionary(
-                        self.dlob_subscriber.dlob,
-                        # self.dlob_client.dlob,
-                        perp_market_account.market_index,
-                        MarketType.Perp(),
-                        oracle_price_data.slot,
-                        oracle_price_data,
-                        str(drift_user.user_public_key),
-                    )
-
-                    if not best_bid or not best_ask:
-                        logger.warning("skipping, no best bid / ask")
-                        return
-
-                    best_bid_price = best_bid.get_price(
-                        oracle_price_data, self.dlob_subscriber.slot_source.get_slot()
-                    )
-
-                    best_ask_price = best_ask.get_price(
-                        oracle_price_data, self.dlob_subscriber.slot_source.get_slot()
-                    )
-
-                    logger.info(f"best bid price: {best_bid_price}")
-                    logger.info(f"best ask price: {best_ask_price}")
-
-                    logger.info(f"oracle price: {oracle_price_data.price}")
-
-                    bid_offset = math.floor(
-                        best_bid_price - (0.99 * oracle_price_data.price)
-                    )
-                    ask_offset = math.floor(
-                        best_ask_price - (1.01 * oracle_price_data.price)
-                    )
-
-                    logger.info(f"max_base: {max_base}")
-
-                    new_perp_params = JitParams(
-                        bid=bid_offset,
-                        ask=ask_offset,
-                        min_position=math.floor((-max_base) * BASE_PRECISION),
-                        max_position=math.floor((max_base) * BASE_PRECISION),
-                        price_type=PriceType.Oracle(),
-                        sub_account_id=sub_id,
-                    )
-
-                    # if overleveraged:
-                    #     new_perp_params = JitParams(
-                    #         bid=0,
-                    #         ask=0,
-                    #         min_position=0,
-                    #         max_position=0,
-                    #         price_type=PriceType.Oracle(),
-                    #         sub_account_id=sub_id,
-                    #     )
-
-                    self.jitter.update_perp_params(perp_idx, new_perp_params)
-                    logger.info(
-                        f"jitter perp params updated, market_index: {perp_idx}, bid: {new_perp_params.bid}, ask: {new_perp_params.ask} "
-                        f"min_position: {new_perp_params.min_position}, max_position: {new_perp_params.max_position}"
-                    )
-
-                    if spot_idx != 0 and self.spot:
-                        spot_market_account = self.drift_client.get_spot_market_account(
-                            spot_idx
-                        )
-
-                        spot_market_precision = 10**spot_market_account.decimals
-
-                        new_spot_params = JitParams(
-                            bid=min(bid_offset, -1),
-                            ask=max(ask_offset, 1),
-                            min_position=math.floor(
-                                (-max_base) * spot_market_precision
-                            ),
-                            max_position=math.floor((max_base) * spot_market_precision),
-                            price_type=PriceType.Oracle(),
-                            sub_account_id=sub_id,
-                        )
-
-                        # if overleveraged:
-                        #     new_spot_params = JitParams(
-                        #         bid=0,
-                        #         ask=0,
-                        #         min_position=0,
-                        #         max_position=0,
-                        #         price_type=PriceType.Oracle(),
-                        #         sub_account_id=sub_id,
-                        #     )
-
-                        self.jitter.update_spot_params(spot_idx, new_spot_params)
-                        logger.info(
-                            f"jitter spot params updated, market_index: {spot_idx}, bid: {new_spot_params.bid}, ask: {new_spot_params.ask} "
-                            f"min_position: {new_spot_params.min_position}, max_position: {new_spot_params.max_position}"
-                        )
-
-                        if (
-                            self.drift_client.active_sub_account_id
-                            == self.sub_accounts[i]
-                        ):
-                            max_size = 200
-                            if spot_idx == 1:
-                                max_size *= 2
-
-                            await rebalance(
-                                self.drift_client,
-                                drift_user,
-                                perp_idx,
-                                spot_idx,
-                                max_size,
-                                max_base * BASE_PCT_DEVIATION_BEFORE_HEDGE,
-                            )
+                for i in range(len(self.market_indexes)):
+                    if is_variant(self.market_type, "Perp"):
+                        await self.jit_perp(i)
+                    else:
+                        await self.jit_spot(i)
 
                 await asyncio.sleep(10)
 
@@ -348,6 +174,254 @@ class JitMaker(Bot):
 
                 async with self.watchdog:
                     self.watchdog_last_pat = time.time()
+
+    async def jit_perp(self, index: int):
+        perp_idx = self.market_indexes[index]
+        sub_id = self.sub_accounts[index]
+        self.drift_client.switch_active_user(sub_id)
+
+        drift_user = self.drift_client.get_user(sub_id)
+        perp_market_account = self.drift_client.get_perp_market_account(perp_idx)
+        oracle_price_data = self.drift_client.get_oracle_price_data_for_perp_market(
+            perp_idx
+        )
+
+        num_markets_for_subaccount = len(
+            [num for num in self.sub_accounts if num == sub_id]
+        )
+
+        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        actual_leverage = drift_user.get_leverage() / 10_000
+
+        max_base = calculate_base_amount_to_mm_perp(
+            perp_market_account,  # type: ignore
+            drift_user.get_net_spot_market_value(None),
+            target_leverage,
+        )
+
+        overlevered_long = False
+        overlevered_short = False
+
+        if actual_leverage >= target_leverage:
+            logger.warning(
+                f"jit maker at or above max leverage actual: {actual_leverage} target: {target_leverage}"
+            )
+            overlevered_base_asset_amount = drift_user.get_perp_position(
+                perp_idx
+            ).base_asset_amount  # type: ignore
+            if overlevered_base_asset_amount > 0:
+                overlevered_long = True
+            elif overlevered_base_asset_amount < 0:
+                overlevered_short = True
+
+        def user_filter(user_account, user_key: str, order) -> bool:
+            skip = user_key == str(drift_user.user_public_key)
+
+            if is_perp_market_volatile(
+                perp_market_account, oracle_price_data, 0.015  # type: ignore
+            ):
+                logger.info(
+                    f"Skipping, Market: {perp_market_account.market_index} is volatile"  # type: ignore
+                )
+                skip = True
+
+            if skip:
+                logger.info(f"Skipping user: {user_key}")
+
+            return skip
+
+        self.jitter.set_user_filter(user_filter)
+
+        best_bid = get_best_limit_bid_exclusionary(
+            self.dlob_subscriber.dlob,  # type: ignore
+            perp_market_account.market_index,  # type: ignore
+            MarketType.Perp(),
+            oracle_price_data.slot,  # type: ignore
+            oracle_price_data,  # type: ignore
+            str(drift_user.user_public_key),
+        )
+
+        best_ask = get_best_limit_ask_exclusionary(
+            self.dlob_subscriber.dlob,  # type: ignore
+            perp_market_account.market_index,  # type: ignore
+            MarketType.Perp(),
+            oracle_price_data.slot,  # type: ignore
+            oracle_price_data,  # type: ignore
+            str(drift_user.user_public_key),
+        )
+
+        if not best_bid or not best_ask:
+            logger.warning("skipping, no best bid / ask")
+            return
+
+        best_bid_price = best_bid.get_price(
+            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+        )
+
+        best_ask_price = best_ask.get_price(
+            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+        )
+
+        logger.info(f"best bid price: {best_bid_price}")
+        logger.info(f"best ask price: {best_ask_price}")
+
+        logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
+
+        bid_offset = math.floor(
+            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+        )
+        ask_offset = math.floor(
+            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+        )
+
+        logger.info(f"max_base: {max_base}")
+
+        perp_min_position = math.floor((-max_base) * BASE_PRECISION)
+        perp_max_position = math.floor((max_base) * BASE_PRECISION)
+        if overlevered_long:
+            perp_max_position = 0
+        elif overlevered_short:
+            perp_min_position = 0
+
+        new_perp_params = JitParams(
+            bid=bid_offset,
+            ask=ask_offset,
+            min_position=perp_min_position,
+            max_position=perp_max_position,
+            price_type=PriceType.Oracle(),
+            sub_account_id=sub_id,
+        )
+
+        self.jitter.update_perp_params(perp_idx, new_perp_params)
+        logger.info(
+            f"jitter perp params updated, market_index: {perp_idx}, bid: {new_perp_params.bid}, ask: {new_perp_params.ask} "
+            f"min_position: {new_perp_params.min_position}, max_position: {new_perp_params.max_position}"
+        )
+
+    async def jit_spot(self, index: int):
+        spot_idx = self.market_indexes[index]
+        sub_id = self.sub_accounts[index]
+        self.drift_client.switch_active_user(sub_id)
+
+        drift_user = self.drift_client.get_user(sub_id)
+        spot_market_account = self.drift_client.get_spot_market_account(spot_idx)
+        oracle_price_data = self.drift_client.get_oracle_price_data_for_spot_market(
+            spot_idx
+        )
+
+        num_markets_for_subaccount = len(
+            [num for num in self.sub_accounts if num == sub_id]
+        )
+
+        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        actual_leverage = drift_user.get_leverage() / 10_000
+
+        max_base = calculate_base_amount_to_mm_spot(
+            spot_market_account,  # type: ignore
+            drift_user.get_net_spot_market_value(None),
+            target_leverage,
+        )
+
+        overlevered_long = False
+        overlevered_short = False
+
+        if actual_leverage >= target_leverage:
+            logger.warning(
+                f"jit maker at or above max leverage actual: {actual_leverage} target: {target_leverage}"
+            )
+            overlevered_base_asset_amount = drift_user.get_spot_position(
+                spot_idx
+            ).scaled_balance  # type: ignore
+            if overlevered_base_asset_amount > 0:
+                overlevered_long = True
+            elif overlevered_base_asset_amount < 0:
+                overlevered_short = True
+
+        def user_filter(user_account, user_key: str, order) -> bool:
+            skip = user_key == str(drift_user.user_public_key)
+
+            if is_spot_market_volatile(
+                spot_market_account, oracle_price_data, 0.015  # type: ignore
+            ):
+                logger.info(
+                    f"Skipping, Market: {spot_market_account.market_index} is volatile"  # type: ignore
+                )
+                skip = True
+
+            if skip:
+                logger.info(f"Skipping user: {user_key}")
+
+            return skip
+
+        self.jitter.set_user_filter(user_filter)
+
+        best_bid = get_best_limit_bid_exclusionary(
+            self.dlob_subscriber.dlob,  # type: ignore
+            spot_market_account.market_index,  # type: ignore
+            MarketType.Spot(),
+            oracle_price_data.slot,  # type: ignore
+            oracle_price_data,  # type: ignore
+            str(drift_user.user_public_key),
+        )
+
+        best_ask = get_best_limit_ask_exclusionary(
+            self.dlob_subscriber.dlob,  # type: ignore
+            spot_market_account.market_index,  # type: ignore
+            MarketType.Spot(),
+            oracle_price_data.slot,  # type: ignore
+            oracle_price_data,  # type: ignore
+            str(drift_user.user_public_key),
+        )
+
+        if not best_bid or not best_ask:
+            logger.warning("skipping, no best bid / ask")
+            return
+
+        best_bid_price = best_bid.get_price(
+            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+        )
+
+        best_ask_price = best_ask.get_price(
+            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+        )
+
+        logger.info(f"best bid price: {best_bid_price}")
+        logger.info(f"best ask price: {best_ask_price}")
+
+        logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
+
+        bid_offset = math.floor(
+            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+        )
+        ask_offset = math.floor(
+            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+        )
+
+        logger.info(f"max_base: {max_base}")
+
+        spot_market_precision = 10**spot_market_account.decimals  # type: ignore
+
+        spot_min_position = math.floor((-max_base) * spot_market_precision)
+        spot_max_position = math.floor((max_base) * spot_market_precision)
+        if overlevered_long:
+            spot_max_position = 0
+        elif overlevered_short:
+            spot_min_position = 0
+
+        new_spot_params = JitParams(
+            bid=min(bid_offset, -1),
+            ask=max(ask_offset, 1),
+            min_position=spot_min_position,
+            max_position=spot_max_position,
+            price_type=PriceType.Oracle(),
+            sub_account_id=sub_id,
+        )
+
+        self.jitter.update_spot_params(spot_idx, new_spot_params)
+        logger.info(
+            f"jitter spot params updated, market_index: {spot_idx}, bid: {new_spot_params.bid}, ask: {new_spot_params.ask} "
+            f"min_position: {new_spot_params.min_position}, max_position: {new_spot_params.max_position}"
+        )
 
 
 def make_health_check_handler(jit_maker):
@@ -386,6 +460,7 @@ async def main():
         wallet,
         "mainnet",
         account_subscription=AccountSubscriptionConfig("websocket"),
+        tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -400,14 +475,29 @@ async def main():
         Pubkey.from_string("J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP"),
     )
 
-    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
+    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, False)
 
-    jit_maker_config = JitMakerConfig("jit maker", False, [0], [0])
+    # This is an example of a perp JIT maker that will JIT the SOL-PERP market
+    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
 
-    for sub_id in jit_maker_config.sub_accounts:
+    for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
 
-    jit_maker = JitMaker(jit_maker_config, drift_client, usermap, jitter, "mainnet")
+    jit_maker = JitMaker(
+        jit_maker_perp_config, drift_client, usermap, jitter, "mainnet"
+    )
+
+    # This is an example of a spot JIT maker that will JIT the SOL market
+    # jit_maker_spot_config = JitMakerConfig(
+    #     "jit maker", [1], [0], MarketType.Spot()
+    # )
+
+    # for sub_id in jit_maker_spot_config.sub_accounts:
+    #     await drift_client.add_user(sub_id)
+
+    # jit_maker = JitMaker(
+    #     jit_maker_spot_config, drift_client, usermap, jitter, "mainnet"
+    # )
 
     asyncio.create_task(start_server(jit_maker))
 

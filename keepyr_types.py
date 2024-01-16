@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 from dataclasses import dataclass
+from driftpy.types import MarketType
 
 
 class Bot(ABC):
@@ -24,11 +25,10 @@ class Bot(ABC):
 @dataclass
 class BotConfig:
     bot_id: str
-    dry_run: bool
 
 
 @dataclass
 class JitMakerConfig(BotConfig):
-    perp_market_indexes: Optional[list[int]]
-    sub_accounts: Optional[list[int]]
-    spot: bool = True  # Set to False if the maker should not hedge with spot
+    market_indexes: list[int]
+    sub_accounts: list[int]
+    market_type: MarketType
