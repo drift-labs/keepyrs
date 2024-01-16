@@ -70,7 +70,6 @@ class JitMaker(Bot):
 
         # Set up attributes from config
         self.name = config.bot_id
-        self.dry_run = config.dry_run
         self.sub_accounts: list[int] = config.sub_accounts  # type: ignore
         self.market_indexes: list[int] = config.market_indexes  # type: ignore
         self.market_type = config.market_type
@@ -98,6 +97,11 @@ class JitMaker(Bot):
             raise ValueError(
                 "You CANNOT make multiple markets with the same sub account id"
             )
+
+        # check to make sure 1:1 unique sub account id to market index ratio
+        market_len = len(self.market_indexes)
+        if dedup_len != market_len:
+            raise ValueError("You must have 1 sub account id per market to jit")
 
         await self.drift_client.subscribe()
         await self.slot_subscriber.subscribe()
@@ -456,7 +460,7 @@ async def main():
         wallet,
         "mainnet",
         account_subscription=AccountSubscriptionConfig("websocket"),
-        tx_params=TxParams(600_000, 16),
+        tx_params=TxParams(600_000, 16),  # crank priority fees way up
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -474,9 +478,7 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig(
-        "jit maker", False, [0], [0], MarketType.Perp()
-    )
+    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
 
     for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
@@ -487,7 +489,7 @@ async def main():
 
     # This is an example of a spot JIT maker that will JIT the SOL market
     # jit_maker_spot_config = JitMakerConfig(
-    #     "jit maker", False, [1], [0], MarketType.Spot()
+    #     "jit maker", [1], [0], MarketType.Spot()
     # )
 
     # for sub_id in jit_maker_spot_config.sub_accounts:

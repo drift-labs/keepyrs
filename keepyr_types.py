@@ -25,11 +25,10 @@ class Bot(ABC):
 @dataclass
 class BotConfig:
     bot_id: str
-    dry_run: bool
 
 
 @dataclass
 class JitMakerConfig(BotConfig):
-    market_indexes: Optional[list[int]]
-    sub_accounts: Optional[list[int]]
+    market_indexes: list[int]
+    sub_accounts: list[int]
     market_type: MarketType
