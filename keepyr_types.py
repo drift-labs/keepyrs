@@ -32,3 +32,10 @@ class JitMakerConfig(BotConfig):
     market_indexes: list[int]
     sub_accounts: list[int]
     market_type: MarketType
+
+
+@dataclass
+class PerpFillerConfig(BotConfig):
+    filler_polling_interval: Optional[float] = None
+    revert_on_failure: bool = False
+    simulate_tx_for_cu_estimate: bool = False
