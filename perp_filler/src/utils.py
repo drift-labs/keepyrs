@@ -1,9 +1,7 @@
 from solders.instruction import Instruction
 
-from perp_filler.src.perp_filler import PerpFiller
 
-
-def get_latest_slot(perp_filler: PerpFiller) -> int:
+def get_latest_slot(perp_filler) -> int:
     return max(perp_filler.slot_subscriber.get_slot(), perp_filler.user_map.get_slot())
 
 

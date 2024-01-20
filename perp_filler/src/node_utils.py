@@ -18,7 +18,6 @@ from keepyr_utils import (
     get_fill_signature_from_user_account_and_order_id,
 )
 
-from perp_filler.src.perp_filler import PerpFiller
 from perp_filler.src.utils import get_latest_slot
 from perp_filler.src.constants import *
 
@@ -26,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def is_still_throttled(perp_filler: PerpFiller, key: str) -> bool:
+def is_still_throttled(perp_filler, key: str) -> bool:
     last_fill_attempt = perp_filler.throttled_nodes.get(key) or 0
     if last_fill_attempt + (FILL_ORDER_THROTTLE_BACKOFF // 1_000) > time.time():
         return True
@@ -35,7 +34,7 @@ def is_still_throttled(perp_filler: PerpFiller, key: str) -> bool:
         return False
 
 
-def is_node_throttled(perp_filler: PerpFiller, node: DLOBNode) -> bool:
+def is_node_throttled(perp_filler, node: DLOBNode) -> bool:
     if (not node.user_account) or (not node.order):  # type: ignore
         return False
 
@@ -57,7 +56,7 @@ def is_node_throttled(perp_filler: PerpFiller, node: DLOBNode) -> bool:
 
 
 def get_perp_nodes_for_market(
-    perp_filler: PerpFiller,
+    perp_filler,
     market: PerpMarketAccount,
     dlob: DLOB,
 ) -> Tuple[list[NodeToFill], list[NodeToTrigger]]:
@@ -95,7 +94,7 @@ def get_perp_nodes_for_market(
 
 
 def filter_perp_nodes_for_market(
-    perp_filler: PerpFiller,
+    perp_filler,
     fillable: list[NodeToFill],
     triggerable: list[NodeToTrigger],
 ) -> Tuple[list[NodeToFill], list[NodeToTrigger]]:
@@ -122,7 +121,7 @@ def filter_perp_nodes_for_market(
     return (filtered_fillable, filtered_triggerable)
 
 
-def filter_fillable(perp_filler: PerpFiller, node: NodeToFill) -> bool:
+def filter_fillable(perp_filler, node: NodeToFill) -> bool:
     if not node.node.order:  # type: ignore
         return False
 
@@ -218,7 +217,7 @@ def filter_fillable(perp_filler: PerpFiller, node: NodeToFill) -> bool:
     return True
 
 
-def filter_triggerable(perp_filler: PerpFiller, node: NodeToTrigger) -> bool:
+def filter_triggerable(perp_filler, node: NodeToTrigger) -> bool:
     # TODO
     if node.node.have_trigger:
         return False
