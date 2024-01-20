@@ -18,7 +18,7 @@ from keepyr_utils import (
     get_fill_signature_from_user_account_and_order_id,
 )
 
-from perp_filler.src.utils import get_latest_slot
+from perp_filler.src.utils import *
 from perp_filler.src.constants import *
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +30,7 @@ def is_still_throttled(perp_filler, key: str) -> bool:
     if last_fill_attempt + (FILL_ORDER_THROTTLE_BACKOFF // 1_000) > time.time():
         return True
     else:
-        perp_filler.remove_throttled_node(key)
+        remove_throttled_node(perp_filler, key)
         return False
 
 
