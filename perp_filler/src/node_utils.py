@@ -31,7 +31,7 @@ def is_still_throttled(perp_filler: PerpFiller, key: str) -> bool:
     if last_fill_attempt + (FILL_ORDER_THROTTLE_BACKOFF // 1_000) > time.time():
         return True
     else:
-        del perp_filler.throttled_nodes[key]
+        perp_filler.remove_throttled_node(key)
         return False
 
 
@@ -70,7 +70,7 @@ def get_perp_nodes_for_market(
     v_ask = calculate_ask_price(market, oracle_price_data)  # type: ignore
     v_bid = calculate_bid_price(market, oracle_price_data)  # type: ignore
 
-    fill_slot = get_latest_slot(perp_filler.user_map, perp_filler.slot_subscriber)
+    fill_slot = get_latest_slot(perp_filler)
 
     nodes_to_fill: list[NodeToFill] = dlob.find_nodes_to_fill(
         market_idx,
@@ -172,7 +172,7 @@ def filter_fillable(perp_filler: PerpFiller, node: NodeToFill) -> bool:
     is_perp_market_type = is_variant(market_type, "Perp")
 
     perp_market_account = perp_filler.drift_client.get_perp_market_account(market_index)
-    latest_slot = get_latest_slot(perp_filler.user_map, perp_filler.slot_subscriber)
+    latest_slot = get_latest_slot(perp_filler)
     ts = int(time.time())
     state_account = perp_filler.drift_client.get_state_account()
 
@@ -197,7 +197,7 @@ def filter_fillable(perp_filler: PerpFiller, node: NodeToFill) -> bool:
             node.node.order,  # type: ignore
             perp_market_account,  # type: ignore
             oracle_price_data,  # type: ignore
-            get_latest_slot(perp_filler.user_map, perp_filler.slot_subscriber),
+            get_latest_slot(perp_filler),
         )
         logger.warning(
             f" . calculate_base_asset_amount_for_amm_to_fulfill: {base_fulfilled}"
@@ -209,7 +209,7 @@ def filter_fillable(perp_filler: PerpFiller, node: NodeToFill) -> bool:
             perp_market_account.amm,  # type: ignore
             oracle_price_data,  # type: ignore
             state_account.oracle_guard_rails,  # type: ignore
-            get_latest_slot(perp_filler.user_map, perp_filler.slot_subscriber),
+            get_latest_slot(perp_filler),
         )
         if not oracle_valid:
             logger.error(f"Oracle is not valid for market: {market_index}")

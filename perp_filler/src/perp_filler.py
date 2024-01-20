@@ -20,7 +20,7 @@ from driftpy.events.event_subscriber import EventSubscriber
 from driftpy.dlob.dlob_subscriber import DLOBSubscriber
 from driftpy.dlob.dlob import DLOB, NodeToFill, NodeToTrigger
 from driftpy.dlob.client_types import DLOBClientConfig
-from driftpy.types import TxParams, PerpMarketAccount, MarketType
+from driftpy.types import TxParams, UserAccount
 from driftpy.priority_fees.priority_fee_subscriber import (
     PriorityFeeSubscriber,
     PriorityFeeConfig,
@@ -98,6 +98,41 @@ class PerpFiller(PerpFillerConfig):
         self.lookup_tables = [await self.drift_client.fetch_market_lookup_table()]
 
         logger.info(f"Initialized {self.name}")
+
+    def remove_throttled_node(self, sig: str):
+        del self.throttled_nodes[sig]
+
+    def remove_triggering_node(self, node: NodeToTrigger):
+        del self.triggering_nodes[get_node_to_trigger_signature(node)]
+
+    def remove_filling_nodes(self, nodes: list[NodeToFill]):
+        for node in nodes:
+            del self.filling_nodes[get_node_to_fill_signature(node)]
+
+    def set_throttled_node(self, sig: str):
+        self.throttled_nodes[sig] = int(time.time())
+
+    def prune_throttled_nodes(self):
+        nodes_to_prune = {}
+
+        if len(self.throttled_nodes) > THROTTLED_NODE_SIZE_TO_PRUNE:
+            for key, val in self.throttled_nodes:
+                if val + 2 * (FILL_ORDER_BACKOFF // 1_000) > time.time():
+                    nodes_to_prune[key] = val
+
+            for key, val in nodes_to_prune:
+                self.remove_throttled_node(key)
+
+    def get_dlob(self) -> DLOB:
+        return self.dlob_subscriber.get_dlob()
+
+    def log_slots(self):
+        logger.info(
+            f"slot_subscriber slot: {self.slot_subscriber.get_slot()} user_map slot: {self.user_map.get_slot()}"
+        )
+
+    async def get_user_account_usermap(self, key: str) -> UserAccount:
+        return (await self.user_map.must_get(key)).get_user_account()
 
     async def reset(self):
         for task in self.tasks:

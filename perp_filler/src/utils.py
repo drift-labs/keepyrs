@@ -1,10 +1,10 @@
-from driftpy.user_map.user_map import UserMap
-from driftpy.slot.slot_subscriber import SlotSubscriber
 from solders.instruction import Instruction
 
+from perp_filler.src.perp_filler import PerpFiller
 
-def get_latest_slot(user_map: UserMap, slot_subscriber: SlotSubscriber) -> int:
-    return max(slot_subscriber.get_slot(), user_map.latest_slot)
+
+def get_latest_slot(perp_filler: PerpFiller) -> int:
+    return max(perp_filler.slot_subscriber.get_slot(), perp_filler.user_map.get_slot())
 
 
 def calc_compact_u16_encoded_size(array, elem_size: int = 1):
