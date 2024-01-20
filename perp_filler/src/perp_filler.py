@@ -3,7 +3,7 @@ import logging
 import time
 import os
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 from dotenv import load_dotenv
 
 from solana.rpc.async_api import AsyncClient
@@ -18,18 +18,21 @@ from driftpy.user_map.user_map_config import UserMapConfig, WebsocketConfig
 from driftpy.user_map.user_map import UserMap
 from driftpy.events.event_subscriber import EventSubscriber
 from driftpy.dlob.dlob_subscriber import DLOBSubscriber
+from driftpy.dlob.dlob import DLOB, NodeToFill, NodeToTrigger
 from driftpy.dlob.client_types import DLOBClientConfig
-from driftpy.types import TxParams
+from driftpy.types import TxParams, PerpMarketAccount, MarketType
 from driftpy.priority_fees.priority_fee_subscriber import (
     PriorityFeeSubscriber,
     PriorityFeeConfig,
 )
 from driftpy.keypair import load_keypair
+from driftpy.math.market import calculate_bid_price, calculate_ask_price
 
 from keepyr_types import PerpFillerConfig
 
 from perp_filler.src.constants import *
-
+from perp_filler.src.node_utils import *
+from perp_filler.src.utils import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,6 +49,10 @@ class PerpFiller(PerpFillerConfig):
     ):
         self.lookup_tables = None
         self.tasks: list[asyncio.Task] = []
+
+        self.filling_nodes: dict[str, int] = {}
+        self.triggering_nodes: dict[str, int] = {}
+        self.throttled_nodes: dict[str, int] = {}
 
         self.task_lock = asyncio.Lock()
         self.watchdog = asyncio.Lock()

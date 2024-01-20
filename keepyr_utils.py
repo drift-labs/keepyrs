@@ -2,8 +2,9 @@ import math
 
 from typing import Optional
 
-from driftpy.dlob.dlob import DLOB
+from driftpy.dlob.dlob import DLOB, NodeToFill, NodeToTrigger
 from driftpy.dlob.dlob_node import DLOBNode
+from driftpy.dlob.node_list import get_order_signature
 from driftpy.types import OraclePriceData, MarketType
 
 
@@ -76,3 +77,20 @@ def round_down_to_nearest(num: int, nearest: int = 100) -> int:
 def decode_name(bytes_list: list[int]) -> str:
     byte_array = bytes(bytes_list)
     return byte_array.decode("utf-8").strip()
+
+
+def get_node_to_fill_signature(node: NodeToFill) -> str:
+    if not node.node.user_account:  # type: ignore
+        return "~"
+
+    return f"{node.node.user_account}-{node.node.order.order_id}"  # type: ignore
+
+
+def get_node_to_trigger_signature(node: NodeToTrigger) -> str:
+    return get_order_signature(node.node.order.order_id, node.node.user_account)  # type: ignore
+
+
+def get_fill_signature_from_user_account_and_order_id(
+    user_account: str, order_id: int
+) -> str:
+    return f"{user_account}-{order_id}"
