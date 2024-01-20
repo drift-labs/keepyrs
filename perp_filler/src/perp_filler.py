@@ -2,8 +2,9 @@ import asyncio
 import logging
 import time
 import os
+import traceback
 
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 from dotenv import load_dotenv
 
 from solana.rpc.async_api import AsyncClient
@@ -18,19 +19,18 @@ from driftpy.user_map.user_map_config import UserMapConfig, WebsocketConfig
 from driftpy.user_map.user_map import UserMap
 from driftpy.events.event_subscriber import EventSubscriber
 from driftpy.dlob.dlob_subscriber import DLOBSubscriber
-from driftpy.dlob.dlob import DLOB, NodeToFill, NodeToTrigger
 from driftpy.dlob.client_types import DLOBClientConfig
-from driftpy.types import TxParams, UserAccount
+from driftpy.types import TxParams
 from driftpy.priority_fees.priority_fee_subscriber import (
     PriorityFeeSubscriber,
     PriorityFeeConfig,
 )
 from driftpy.keypair import load_keypair
-from driftpy.math.market import calculate_bid_price, calculate_ask_price
 
 from keepyr_types import PerpFillerConfig
 
 from perp_filler.src.constants import *
+from perp_filler.src.fill_utils import *
 from perp_filler.src.node_utils import *
 from perp_filler.src.utils import *
 
@@ -141,6 +141,60 @@ class PerpFiller(PerpFillerConfig):
 
     async def try_fill(self):
         logger.info("Try Fill started")
+        start = time.time()
+        ran = False
+        try:
+            async with self.task_lock:
+                dlob = await get_dlob(self)
+
+                prune_throttled_nodes(self)
+
+                fillable_nodes = []
+                triggerable_nodes = []
+                for market in self.drift_client.get_perp_market_accounts():
+                    try:
+                        nodes_to_fill, nodes_to_trigger = get_perp_nodes_for_market(
+                            self, market, dlob
+                        )
+
+                        fillable_nodes += nodes_to_fill
+                        triggerable_nodes += nodes_to_trigger
+
+                    except Exception as e:
+                        logger.error(
+                            f"{self.name} Failed to get nodes for market: {market.market_index}"
+                        )
+                        traceback.print_exc()
+                        continue
+
+                (
+                    filtered_fillable_nodes,
+                    filtered_triggerable_nodes,
+                ) = filter_perp_nodes_for_market(
+                    self, fillable_nodes, triggerable_nodes
+                )
+
+                await asyncio.gather(
+                    execute_fillable_perp_nodes_for_market(
+                        self, filtered_fillable_nodes
+                    ),
+                    execute_triggerable_perp_nodes_for_market(
+                        self, filtered_triggerable_nodes
+                    ),
+                )
+
+                logger.info(f"done: {time.time() - start}s")
+                ran = True
+        except Exception as e:
+            logger.error(f"{e}")
+            raise e
+        finally:
+            if ran:
+                duration = time.time() - start
+                logger.info(f"try_fill done, took {duration}s")
+
+                async with self.watchdog:
+                    self.watchdog_last_pat = time.time()
 
     async def settle_pnls(self):
         logger.info("Settle PnLs started")
