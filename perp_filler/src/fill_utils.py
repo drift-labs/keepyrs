@@ -103,3 +103,14 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
 
         if not is_variant(market_type, "Perp"):
             raise ValueError("Expected perp market type")
+
+        ix = await perp_filler.drift_client.get_fill_perp_order_ix()
+
+    #         async def get_fill_perp_order_ix(
+    #     self,
+    #     user_account_pubkey: Pubkey,
+    #     user_account: UserAccount,
+    #     order: Order,
+    #     maker_info: Optional[Union[MakerInfo, list[MakerInfo]]],
+    #     referrer_info: Optional[ReferrerInfo]
+    # ) -> Instruction:
