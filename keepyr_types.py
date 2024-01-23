@@ -32,3 +32,5 @@ class JitMakerConfig(BotConfig):
     market_indexes: list[int]
     sub_accounts: list[int]
     market_type: MarketType
+    target_leverage: float
+    spread: float

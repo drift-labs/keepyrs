@@ -44,8 +44,6 @@ from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 1
-
 
 class JitMaker(Bot):
     def __init__(
@@ -73,6 +71,8 @@ class JitMaker(Bot):
         self.sub_accounts: list[int] = config.sub_accounts  # type: ignore
         self.market_indexes: list[int] = config.market_indexes  # type: ignore
         self.market_type = config.market_type
+        self.target_leverage = config.target_leverage
+        self.spread = config.spread
 
         # Set up clients & subscriptions
         self.drift_client = drift_client
@@ -190,7 +190,7 @@ class JitMaker(Bot):
             [num for num in self.sub_accounts if num == sub_id]
         )
 
-        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        target_leverage = self.target_leverage / num_markets_for_subaccount
         actual_leverage = drift_user.get_leverage() / 10_000
 
         max_base = calculate_base_amount_to_mm_perp(
@@ -268,10 +268,10 @@ class JitMaker(Bot):
         logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
 
         bid_offset = math.floor(
-            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+            best_bid_price - ((1 + self.spread) * oracle_price_data.price)  # type: ignore
         )
         ask_offset = math.floor(
-            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+            best_ask_price - ((1 - self.spread) * oracle_price_data.price)  # type: ignore
         )
 
         logger.info(f"max_base: {max_base}")
@@ -313,7 +313,7 @@ class JitMaker(Bot):
             [num for num in self.sub_accounts if num == sub_id]
         )
 
-        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        target_leverage = self.target_leverage / num_markets_for_subaccount
         actual_leverage = drift_user.get_leverage() / 10_000
 
         max_base = calculate_base_amount_to_mm_spot(
@@ -391,10 +391,10 @@ class JitMaker(Bot):
         logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
 
         bid_offset = math.floor(
-            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+            best_bid_price - ((1 + self.spread) * oracle_price_data.price)  # type: ignore
         )
         ask_offset = math.floor(
-            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+            best_ask_price - ((1 - self.spread) * oracle_price_data.price)  # type: ignore
         )
 
         logger.info(f"max_base: {max_base}")
@@ -478,7 +478,9 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, False)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
+    jit_maker_perp_config = JitMakerConfig(
+        "jit maker", [0], [0], MarketType.Perp(), 1.0, 0.001
+    )
 
     for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
@@ -489,7 +491,7 @@ async def main():
 
     # This is an example of a spot JIT maker that will JIT the SOL market
     # jit_maker_spot_config = JitMakerConfig(
-    #     "jit maker", [1], [0], MarketType.Spot()
+    #     "jit maker", [1], [0], MarketType.Spot(), 1.0, 0.001
     # )
 
     # for sub_id in jit_maker_spot_config.sub_accounts:
