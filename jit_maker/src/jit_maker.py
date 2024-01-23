@@ -239,6 +239,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         best_ask = get_best_limit_ask_exclusionary(
@@ -248,6 +249,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         if not best_bid or not best_ask:
@@ -362,6 +364,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         best_ask = get_best_limit_ask_exclusionary(
@@ -371,6 +374,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         if not best_bid or not best_ask:
