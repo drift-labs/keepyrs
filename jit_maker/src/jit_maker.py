@@ -479,7 +479,7 @@ async def main():
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
     jit_maker_perp_config = JitMakerConfig(
-        "jit maker", [0], [0], MarketType.Perp(), 1.0, 0.001
+        "jit maker", [0], [0], MarketType.Perp(), 1.0
     )
 
     for sub_id in jit_maker_perp_config.sub_accounts:
@@ -491,7 +491,7 @@ async def main():
 
     # This is an example of a spot JIT maker that will JIT the SOL market
     # jit_maker_spot_config = JitMakerConfig(
-    #     "jit maker", [1], [0], MarketType.Spot(), 1.0, 0.001
+    #     "jit maker", [1], [0], MarketType.Spot(), 1.0
     # )
 
     # for sub_id in jit_maker_spot_config.sub_accounts:
