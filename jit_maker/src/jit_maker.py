@@ -44,8 +44,6 @@ from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TARGET_LEVERAGE_PER_ACCOUNT = 1
-
 
 class JitMaker(Bot):
     def __init__(
@@ -73,6 +71,8 @@ class JitMaker(Bot):
         self.sub_accounts: list[int] = config.sub_accounts  # type: ignore
         self.market_indexes: list[int] = config.market_indexes  # type: ignore
         self.market_type = config.market_type
+        self.target_leverage = config.target_leverage
+        self.spread = config.spread
 
         # Set up clients & subscriptions
         self.drift_client = drift_client
@@ -190,7 +190,7 @@ class JitMaker(Bot):
             [num for num in self.sub_accounts if num == sub_id]
         )
 
-        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        target_leverage = self.target_leverage / num_markets_for_subaccount
         actual_leverage = drift_user.get_leverage() / 10_000
 
         max_base = calculate_base_amount_to_mm_perp(
@@ -239,6 +239,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         best_ask = get_best_limit_ask_exclusionary(
@@ -248,6 +249,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         if not best_bid or not best_ask:
@@ -268,10 +270,10 @@ class JitMaker(Bot):
         logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
 
         bid_offset = math.floor(
-            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+            best_bid_price - ((1 + self.spread) * oracle_price_data.price)  # type: ignore
         )
         ask_offset = math.floor(
-            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+            best_ask_price - ((1 - self.spread) * oracle_price_data.price)  # type: ignore
         )
 
         logger.info(f"max_base: {max_base}")
@@ -284,8 +286,8 @@ class JitMaker(Bot):
             perp_min_position = 0
 
         new_perp_params = JitParams(
-            bid=bid_offset,
-            ask=ask_offset,
+            bid=min(bid_offset, 0),
+            ask=max(ask_offset, 0),
             min_position=perp_min_position,
             max_position=perp_max_position,
             price_type=PriceType.Oracle(),
@@ -313,7 +315,7 @@ class JitMaker(Bot):
             [num for num in self.sub_accounts if num == sub_id]
         )
 
-        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        target_leverage = self.target_leverage / num_markets_for_subaccount
         actual_leverage = drift_user.get_leverage() / 10_000
 
         max_base = calculate_base_amount_to_mm_spot(
@@ -362,6 +364,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         best_ask = get_best_limit_ask_exclusionary(
@@ -371,6 +374,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         if not best_bid or not best_ask:
@@ -391,10 +395,10 @@ class JitMaker(Bot):
         logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
 
         bid_offset = math.floor(
-            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+            best_bid_price - ((1 + self.spread) * oracle_price_data.price)  # type: ignore
         )
         ask_offset = math.floor(
-            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+            best_ask_price - ((1 - self.spread) * oracle_price_data.price)  # type: ignore
         )
 
         logger.info(f"max_base: {max_base}")

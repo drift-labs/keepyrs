@@ -15,6 +15,7 @@ def get_best_limit_bid_exclusionary(
     oracle_price_data: OraclePriceData,
     excluded_pubkey: str,
     excluded_user_accounts_and_order: list[tuple[str, int]] = [],
+    uncross: bool = False,
 ) -> Optional[DLOBNode]:
     bids = dlob.get_resting_limit_bids(
         market_index, slot, market_type, oracle_price_data
@@ -26,6 +27,9 @@ def get_best_limit_bid_exclusionary(
                 continue
             if hasattr(bid, "order"):
                 order_id = bid.order.order_id
+                price = bid.order.price
+                if uncross and price > oracle_price_data.price:
+                    continue
                 if any(
                     entry[0] == str(bid.user_account) and entry[1] == (order_id or -1)
                     for entry in excluded_user_accounts_and_order
@@ -45,6 +49,7 @@ def get_best_limit_ask_exclusionary(
     oracle_price_data: OraclePriceData,
     excluded_pubkey: str,
     excluded_user_accounts_and_order: list[tuple[str, int]] = [],
+    uncross: bool = False,
 ) -> Optional[DLOBNode]:
     asks = dlob.get_resting_limit_asks(
         market_index, slot, market_type, oracle_price_data
@@ -56,6 +61,9 @@ def get_best_limit_ask_exclusionary(
                 continue
             if hasattr(ask, "order"):
                 order_id = ask.order.order_id
+                price = ask.order.price
+                if uncross and price < oracle_price_data.price:
+                    continue
                 if any(
                     entry[0] == str(ask.user_account) and entry[1] == (order_id or -1)
                     for entry in excluded_user_accounts_and_order
