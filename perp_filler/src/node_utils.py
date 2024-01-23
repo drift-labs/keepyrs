@@ -1,10 +1,21 @@
 import time
 import logging
 
-from typing import Tuple
+from typing import Optional, Tuple
+from dataclasses import dataclass
+
+from solders.pubkey import Pubkey
 
 from driftpy.dlob.dlob import DLOB, NodeToTrigger, NodeToFill, DLOBNode
-from driftpy.types import MarketType, PerpMarketAccount, is_variant
+from driftpy.types import (
+    MarketType,
+    PerpMarketAccount,
+    is_variant,
+    MakerInfo,
+    UserStatsAccount,
+    ReferrerInfo,
+    UserAccount,
+)
 from driftpy.math.market import calculate_ask_price, calculate_bid_price
 from driftpy.math.orders import (
     is_order_expired,
@@ -12,18 +23,34 @@ from driftpy.math.orders import (
     calculate_base_asset_amount_for_amm_to_fulfill,
 )
 from driftpy.math.oracles import is_oracle_valid
+from driftpy.addresses import get_user_stats_account_public_key
+from driftpy.accounts.get_accounts import get_user_stats_account
 
+from keepyr_types import MakerNodeMap
 from keepyr_utils import (
     get_node_to_fill_signature,
     get_node_to_trigger_signature,
     get_fill_signature_from_user_account_and_order_id,
 )
 
-from perp_filler.src.utils import *
+from perp_filler.src.utils import (
+    get_latest_slot,
+    get_user_account_from_map,
+    remove_throttled_node,
+)
 from perp_filler.src.constants import *
+from perp_filler.src.maker_utils import select_makers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class NodeFillInfo:
+    maker_infos: list[MakerInfo]
+    taker_user_account: UserAccount
+    referrer_info: ReferrerInfo
+    market_type: MarketType
 
 
 def is_still_throttled(perp_filler, key: str) -> bool:
@@ -231,3 +258,64 @@ def filter_triggerable(perp_filler, node: NodeToTrigger) -> bool:
             return False
 
     return True
+
+
+async def get_node_fill_info(perp_filler, node: NodeToFill):
+    maker_infos: list[MakerInfo] = []
+    if len(node.maker) > 0:
+        maker_nodes_map: MakerNodeMap = {}
+
+        for maker in node.maker:
+            if is_node_throttled(perp_filler, maker):
+                continue
+
+            if getattr(maker, "user_account", None) is None:
+                continue
+
+            user_account = maker.user_account  # type: ignore
+
+            if user_account in maker_nodes_map:
+                maker_nodes_map.get(user_account).append(maker)  # type: ignore
+            else:
+                maker_nodes_map[user_account] = [maker]
+
+            if len(maker_nodes_map) > MAX_MAKERS_PER_FILL:
+                logger.info(f"selecting from {len(maker_nodes_map)} makers")
+                maker_nodes_map = select_makers(maker_nodes_map)
+                logger.info(f"selected: {','.join(list(maker_nodes_map.keys()))}")
+
+        for maker_account, nodes in maker_nodes_map.items():
+            maker_node = nodes[0]
+
+            maker_user_account = await get_user_account_from_map(
+                perp_filler, maker_account
+            )
+            maker_authority = maker_user_account.authority
+            maker_user_stats = await get_user_stats_account(
+                perp_filler.drift_client.program_id, maker_authority
+            )
+            maker_infos.append(MakerInfo(Pubkey.from_string(maker_account), maker_user_stats, maker_user_account, maker_node.order))  # type: ignore
+
+    taker_user_account = await get_user_account_from_map(perp_filler, str(node.node.user_account))  # type: ignore
+    taker_user_stats = await get_user_stats_account(
+        perp_filler.drift_client.program_id, taker_user_account.authority
+    )
+    referrer_info = get_referrer_info(perp_filler, taker_user_stats)
+
+    node_fill_info = NodeFillInfo(maker_infos, taker_user_account, referrer_info, node.node.order.market_type)  # type: ignore
+
+    return node_fill_info
+
+
+def get_referrer_info(
+    perp_filler, taker_stats: UserStatsAccount
+) -> Optional[ReferrerInfo]:
+    if taker_stats.referrer == Pubkey.default():
+        return None
+    else:
+        return ReferrerInfo(
+            taker_stats.referrer,
+            get_user_stats_account_public_key(
+                perp_filler.drift_client.program_id, taker_stats.referrer
+            ),
+        )

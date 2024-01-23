@@ -62,6 +62,7 @@ class PerpFiller(PerpFillerConfig):
         self.revert_on_failure = config.revert_on_failure
         self.simulate_tx_for_cu_estimate = config.simulate_tx_for_cu_estimate
         self.polling_interval = config.filler_polling_interval or DEFAULT_INTERVAL_S
+        self.use_burst_cu_limit = config.use_burst_cu_limit
 
         self.drift_client = drift_client
         self.slot_subscriber = SlotSubscriber(self.drift_client)
@@ -86,6 +87,8 @@ class PerpFiller(PerpFillerConfig):
         self.priority_fee_subscriber = PriorityFeeSubscriber(pf_config)
 
         self.fill_tx_id = 0
+
+        self.lookup_table = drift_client.market_lookup_table_account
 
     async def init(self):
         logger.info(f"Initializing {self.name}")
@@ -225,7 +228,7 @@ async def main():
 
     await usermap.subscribe()
 
-    perp_filler_config = PerpFillerConfig("perp filler")
+    perp_filler_config = PerpFillerConfig("perp filler", use_burst_cu_limit=True)
 
     perp_filler = PerpFiller(perp_filler_config, drift_client, usermap)
 

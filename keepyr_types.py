@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from dataclasses import dataclass
 from driftpy.types import MarketType
+from driftpy.dlob.dlob_node import DLOBNode
+
+MakerNodeMap = dict[str, list[DLOBNode]]
 
 
 class Bot(ABC):
@@ -41,3 +44,4 @@ class PerpFillerConfig(BotConfig):
     filler_polling_interval: Optional[float] = None
     revert_on_failure: bool = False
     simulate_tx_for_cu_estimate: bool = False
+    use_burst_cu_limit: bool = False

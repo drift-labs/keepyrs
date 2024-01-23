@@ -6,7 +6,7 @@ from driftpy.math.conversion import convert_to_number
 from driftpy.dlob.dlob_node import DLOBNode
 from driftpy.math.utils import div_ceil
 
-from perp_filler.src.utils import MakerNodeMap
+from keepyr_types import MakerNodeMap
 from perp_filler.src.constants import MAX_MAKERS_PER_FILL
 
 PROBABILITY_PRECISION = 1_000
