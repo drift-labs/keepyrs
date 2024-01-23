@@ -284,8 +284,8 @@ class JitMaker(Bot):
             perp_min_position = 0
 
         new_perp_params = JitParams(
-            bid=bid_offset,
-            ask=ask_offset,
+            bid=min(bid_offset, 0),
+            ask=max(ask_offset, 0),
             min_position=perp_min_position,
             max_position=perp_max_position,
             price_type=PriceType.Oracle(),
