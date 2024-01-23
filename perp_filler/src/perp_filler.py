@@ -85,6 +85,8 @@ class PerpFiller(PerpFillerConfig):
 
         self.priority_fee_subscriber = PriorityFeeSubscriber(pf_config)
 
+        self.fill_tx_id = 0
+
     async def init(self):
         logger.info(f"Initializing {self.name}")
 
@@ -145,7 +147,7 @@ class PerpFiller(PerpFillerConfig):
         ran = False
         try:
             async with self.task_lock:
-                dlob = await get_dlob(self)
+                dlob = get_dlob(self)
 
                 prune_throttled_nodes(self)
 

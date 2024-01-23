@@ -5,6 +5,7 @@ from typing import Tuple
 
 from driftpy.dlob.dlob import DLOB, NodeToTrigger, NodeToFill, DLOBNode
 from driftpy.types import MarketType, PerpMarketAccount, is_variant
+from driftpy.math.market import calculate_ask_price, calculate_bid_price
 from driftpy.math.orders import (
     is_order_expired,
     is_fillable_by_vamm,
@@ -77,8 +78,8 @@ def get_perp_nodes_for_market(
         int(time.time()),
         MarketType.Perp(),
         oracle_price_data,  # type: ignore
-        self.drift_client.get_state_account(),  # type: ignore
-        self.drift_client.get_perp_market_account(market_idx),  # type: ignore
+        perp_filler.drift_client.get_state_account(),  # type: ignore
+        perp_filler.drift_client.get_perp_market_account(market_idx),  # type: ignore
         v_bid,
         v_ask,
     )
@@ -87,7 +88,7 @@ def get_perp_nodes_for_market(
         market_idx,
         oracle_price_data.price,  # type: ignore
         MarketType.Perp(),
-        self.drift_client.get_state_account(),  # type: ignore
+        perp_filler.drift_client.get_state_account(),  # type: ignore
     )
 
     return (nodes_to_fill, nodes_to_trigger)

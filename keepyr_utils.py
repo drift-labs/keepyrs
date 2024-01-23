@@ -1,11 +1,42 @@
 import math
+import time
+import logging
 
-from typing import Optional
+from typing import Optional, Union
+from dataclasses import dataclass
+
+from solana.rpc.types import TxOpts
+
+from solders.transaction import VersionedTransaction
+from solders.transaction_status import TransactionErrorType
+from solders.instruction import Instruction
+from solders.address_lookup_table_account import AddressLookupTableAccount
+from solders.pubkey import Pubkey
+from solders.keypair import Keypair
+from solders.compute_budget import set_compute_unit_limit
+
+from driftpy.drift_client import DriftClient
+from driftpy.tx.standard_tx_sender import StandardTxSender
 
 from driftpy.dlob.dlob import DLOB, NodeToFill, NodeToTrigger
 from driftpy.dlob.dlob_node import DLOBNode
 from driftpy.dlob.node_list import get_order_signature
 from driftpy.types import OraclePriceData, MarketType
+
+COMPUTE_BUDGET_PROGRAM = Pubkey.from_string(
+    "ComputeBudget111111111111111111111111111111"
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SimulateAndGetTxWithCUsResponse:
+    cu_estimate: int
+    tx: VersionedTransaction
+    sim_tx_logs: Optional[list[str]] = None
+    sim_error: Optional[Union[TransactionErrorType, str]] = None
 
 
 def get_best_limit_bid_exclusionary(
@@ -94,3 +125,71 @@ def get_fill_signature_from_user_account_and_order_id(
     user_account: str, order_id: int
 ) -> str:
     return f"{user_account}-{order_id}"
+
+
+def is_set_compute_units_ix(ix: Instruction) -> bool:
+    if (ix.program_id == COMPUTE_BUDGET_PROGRAM) and (ix.data[0] == 2):
+        return True
+    return False
+
+
+async def simulate_and_get_tx_with_cus(
+    ixs: list[Instruction],
+    drift_client: DriftClient,
+    tx_sender: StandardTxSender,
+    lookup_tables: list[AddressLookupTableAccount],
+    additional_signers: list[Keypair],
+    opts: Optional[TxOpts] = None,
+    cu_limit_multiplier: float = 1.0,
+    log_sim_duration: bool = False,
+    do_sim: bool = True,
+):
+    if len(ixs) == 0:
+        raise ValueError("cannot simulate empty tx")
+
+    set_cu_limit_ix_idx = -1
+    for idx, ix in enumerate(ixs):
+        if is_set_compute_units_ix(ix):
+            set_cu_limit_ix_idx = idx
+            break
+
+    tx = await tx_sender.get_versioned_tx(
+        ixs, drift_client.wallet.payer, lookup_tables, additional_signers
+    )
+
+    if not do_sim:
+        return SimulateAndGetTxWithCUsResponse(-1, tx)
+
+    try:
+        start = time.time()
+        resp = await drift_client.connection.simulate_transaction(
+            tx, commitment=drift_client.connection.commitment
+        )
+
+        if log_sim_duration:
+            logger.info(f"Simulated tx took: {time.time() - start} time")
+
+    except Exception as e:
+        logger.error(e)
+
+    if not resp:
+        raise ValueError("Failed to simulate transaction")
+
+    if not resp.value.units_consumed:
+        raise ValueError("Failed to get CUs from simulate transaction")
+
+    sim_tx_logs = resp.value.logs
+    cu_estimate = resp.value.units_consumed
+
+    if set_cu_limit_ix_idx == -1:
+        ixs.insert(0, set_compute_unit_limit(int(cu_estimate * cu_limit_multiplier)))
+    else:
+        ixs[set_cu_limit_ix_idx] = set_compute_unit_limit(
+            int(cu_estimate * cu_limit_multiplier)
+        )
+
+    tx = await tx_sender.get_versioned_tx(
+        ixs, drift_client.wallet.payer, lookup_tables, additional_signers
+    )
+
+    return SimulateAndGetTxWithCUsResponse(cu_estimate, tx, sim_tx_logs, resp.value.err)

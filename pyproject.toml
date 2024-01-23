@@ -11,7 +11,7 @@ anchorpy = "0.17.1"
 solana = "0.30.1"
 python-dotenv = "^1.0.0"
 jit-proxy = { git = "https://github.com/drift-labs/jit-proxy.git", branch = "master", subdirectory = "python"}
-driftpy = "0.7.17"
+driftpy = {path = "/Users/frankfinnegan/Documents/musings/drift/driftpy", develop = true}
 
 [build-system]
 requires = ["poetry-core"]
