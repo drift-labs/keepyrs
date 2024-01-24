@@ -190,7 +190,7 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
             # do not try to fill limit orders because they will auto expire when filled against
             return False
         logger.warning(
-            f"order is expired on market: {market_index}"
+            f"order is expired on market: {market_index} "
             f"for user {user_account}-{order_id}"
         )
         return True
@@ -203,7 +203,7 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
     ts = int(time.time())
     state_account = perp_filler.drift_client.get_state_account()
 
-    is_fillable = is_fillable_by_vamm(
+    is_not_fillable = not is_fillable_by_vamm(
         node.node.order,  # type: ignore
         perp_market_account,  # type: ignore
         oracle_price_data,  # type: ignore
@@ -212,13 +212,13 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
         state_account.min_perp_auction_duration,  # type: ignore
     )
 
-    if is_maker_empty and is_perp_market_type and not is_fillable:
+    if is_maker_empty and is_perp_market_type and is_not_fillable:
         logger.warning(
             f"filtered out unfillable node on market {market_index} for user {user_account}-{order_id}"
         )
-        logger.warning(f" . no maker node: {len(node.maker) == 0}")
-        logger.warning(f" . is perp: {is_variant(market_type, 'perp')}")
-        logger.warning(f" . is not fillable by vamm: {not is_fillable}")
+        logger.warning(f" . no maker node: {is_maker_empty}")
+        logger.warning(f" . is perp: {is_perp_market_type}")
+        logger.warning(f" . is not fillable by vamm: {is_not_fillable}")
 
         base_fulfilled = calculate_base_asset_amount_for_amm_to_fulfill(
             node.node.order,  # type: ignore
@@ -246,7 +246,6 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
 
 
 def filter_triggerable(perp_filler, node: NodeToTrigger) -> bool:
-    # TODO
     if node.node.have_trigger:
         return False
 
@@ -277,7 +276,7 @@ async def get_node_fill_info(perp_filler, node: NodeToFill):
             if user_account in maker_nodes_map:
                 maker_nodes_map.get(user_account).append(maker)  # type: ignore
             else:
-                maker_nodes_map[user_account] = [maker]
+                maker_nodes_map[str(user_account)] = [maker]
 
             if len(maker_nodes_map) > MAX_MAKERS_PER_FILL:
                 logger.info(f"selecting from {len(maker_nodes_map)} makers")
@@ -291,14 +290,14 @@ async def get_node_fill_info(perp_filler, node: NodeToFill):
                 perp_filler, maker_account
             )
             maker_authority = maker_user_account.authority
-            maker_user_stats = await get_user_stats_account(
-                perp_filler.drift_client.program_id, maker_authority
+            maker_user_stats = get_user_stats_account_public_key(
+                perp_filler.drift_client.program.program_id, maker_authority
             )
             maker_infos.append(MakerInfo(Pubkey.from_string(maker_account), maker_user_stats, maker_user_account, maker_node.order))  # type: ignore
 
     taker_user_account = await get_user_account_from_map(perp_filler, str(node.node.user_account))  # type: ignore
     taker_user_stats = await get_user_stats_account(
-        perp_filler.drift_client.program_id, taker_user_account.authority
+        perp_filler.drift_client.program, taker_user_account.authority
     )
     referrer_info = get_referrer_info(perp_filler, taker_user_stats)
 

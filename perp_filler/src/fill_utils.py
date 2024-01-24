@@ -32,12 +32,18 @@ logger = logging.getLogger(__name__)
 
 async def execute_fillable_perp_nodes_for_market(perp_filler, nodes: list[NodeToFill]):
     logger.info(f"filling {len(nodes)} nodes")
+    filled_node_count = 0
+    while filled_node_count < len(nodes):
+        attempted_fills = await try_bulk_fill_perp_nodes(
+            perp_filler, nodes[filled_node_count:]
+        )
+        filled_node_count += attempted_fills
 
 
 async def execute_triggerable_perp_nodes_for_market(
     perp_filler, nodes: list[NodeToTrigger]
 ):
-    logger.info(f"filling {len(nodes)} nodes")
+    logger.info(f"triggering {len(nodes)} nodes")
 
 
 async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
@@ -66,7 +72,7 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
     running_cu_used = 0
 
     unique_accounts: Set[str] = set()
-    unique_accounts.add(str(perp_filler.drift_client.wallet.pubkey()))
+    unique_accounts.add(str(perp_filler.drift_client.authority))
 
     compute_budget_ix = ixs[0]
     for account in compute_budget_ix.accounts:
@@ -190,7 +196,7 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
 
         logger.info(
             f"sending tx: {len(unique_accounts)} unique accounts, "
-            f"total ix: {idx_used}, calcd tx size: {running_tx_size}"
+            f"total ix: {idx_used}, calcd tx size: {running_tx_size} "
             f"took {time.time() - tx_packer_start}s (fill tx id: {fill_tx_id})"
         )
 
@@ -199,9 +205,9 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
 
         sim_result = await simulate_and_get_tx_with_cus(
             ixs,
-            perp_filler.drift_client.connection,
+            perp_filler.drift_client,
             perp_filler.drift_client.tx_sender,
-            [perp_filler.lookup_table],
+            perp_filler.lookup_tables,
             [],
             None,
             SIM_CU_ESTIMATE_MULTIPLIER,
@@ -223,3 +229,5 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
         else:
             # TODO send transaction
             pass
+
+    return len(nodes_sent)

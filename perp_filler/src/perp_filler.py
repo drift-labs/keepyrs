@@ -26,6 +26,7 @@ from driftpy.priority_fees.priority_fee_subscriber import (
     PriorityFeeConfig,
 )
 from driftpy.keypair import load_keypair
+from driftpy.constants.config import configs
 
 from keepyr_types import PerpFillerConfig
 
@@ -87,8 +88,6 @@ class PerpFiller(PerpFillerConfig):
         self.priority_fee_subscriber = PriorityFeeSubscriber(pf_config)
 
         self.fill_tx_id = 0
-
-        self.lookup_table = drift_client.market_lookup_table_account
 
     async def init(self):
         logger.info(f"Initializing {self.name}")
@@ -228,7 +227,9 @@ async def main():
 
     await usermap.subscribe()
 
-    perp_filler_config = PerpFillerConfig("perp filler", use_burst_cu_limit=True)
+    perp_filler_config = PerpFillerConfig(
+        "perp filler", simulate_tx_for_cu_estimate=True, use_burst_cu_limit=True
+    )
 
     perp_filler = PerpFiller(perp_filler_config, drift_client, usermap)
 

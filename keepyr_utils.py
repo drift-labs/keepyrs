@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from solana.rpc.types import TxOpts
 
+from solana.transaction import Transaction
+
 from solders.transaction import VersionedTransaction
 from solders.transaction_status import TransactionErrorType
 from solders.instruction import Instruction
@@ -145,7 +147,7 @@ async def simulate_and_get_tx_with_cus(
     ixs: list[Instruction],
     drift_client: DriftClient,
     tx_sender: StandardTxSender,
-    lookup_tables: list[AddressLookupTableAccount],
+    lookup_tables: AddressLookupTableAccount,
     additional_signers: list[Keypair],
     opts: Optional[TxOpts] = None,
     cu_limit_multiplier: float = 1.0,
@@ -162,14 +164,18 @@ async def simulate_and_get_tx_with_cus(
             break
 
     tx = await tx_sender.get_versioned_tx(
-        ixs, drift_client.wallet.payer, lookup_tables, additional_signers
+        ixs, drift_client.wallet.payer, lookup_tables, additional_signers  # type: ignore
     )
+
+    print(f"type: {type(tx)}")
+    print(f"isinstance transaction: {isinstance(tx, Transaction)}")
 
     if not do_sim:
         return SimulateAndGetTxWithCUsResponse(-1, tx)
 
     try:
         start = time.time()
+
         resp = await drift_client.connection.simulate_transaction(
             tx, commitment=drift_client.connection.commitment
         )
@@ -180,10 +186,13 @@ async def simulate_and_get_tx_with_cus(
     except Exception as e:
         logger.error(e)
 
+    print(resp)
+    print(resp.value.units_consumed)
+
     if not resp:
         raise ValueError("Failed to simulate transaction")
 
-    if not resp.value.units_consumed:
+    if resp.value.units_consumed is None:
         raise ValueError("Failed to get CUs from simulate transaction")
 
     sim_tx_logs = resp.value.logs
@@ -197,7 +206,7 @@ async def simulate_and_get_tx_with_cus(
         )
 
     tx = await tx_sender.get_versioned_tx(
-        ixs, drift_client.wallet.payer, lookup_tables, additional_signers
+        ixs, drift_client.wallet.payer, lookup_tables, additional_signers  # type: ignore
     )
 
     return SimulateAndGetTxWithCUsResponse(cu_estimate, tx, sim_tx_logs, resp.value.err)

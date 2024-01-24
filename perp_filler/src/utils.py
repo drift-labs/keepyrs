@@ -5,16 +5,9 @@ from typing import Optional
 from dataclasses import dataclass
 
 from solders.instruction import Instruction
-from solders.pubkey import Pubkey
 
 from driftpy.dlob.dlob import NodeToFill, NodeToTrigger, DLOB
-from driftpy.types import (
-    UserAccount,
-    MakerInfo,
-    UserStatsAccount,
-    ReferrerInfo,
-    MarketType,
-)
+from driftpy.types import UserAccount
 from driftpy.constants import *
 from driftpy.math.conversion import convert_to_number
 
@@ -70,7 +63,7 @@ def log_slots(perp_filler):
 
 
 async def get_user_account_from_map(perp_filler, key: str) -> UserAccount:
-    return (await perp_filler.user_map.must_get(key)).get_user_account()
+    return (await perp_filler.user_map.must_get(str(key))).get_user_account()
 
 
 def calc_compact_u16_encoded_size(array, elem_size: int = 1):
@@ -140,7 +133,7 @@ def log_message_for_node_to_fill(node: NodeToFill, prefix: Optional[str]) -> str
             order = getattr(maker, "order")
 
             msg += (
-                f"  [{i}] market {order.market_index}: {maker.user_account}-{order.order_id} "  # type: ignore
+                f"  [{idx}] market {order.market_index}: {maker.user_account}-{order.order_id} "  # type: ignore
                 f"{str(order.direction)} "  # type: ignore
                 f"{convert_to_number(order.base_asset_amount_filled, BASE_PRECISION)}/"  # type: ignore
                 f"{convert_to_number(order.base_asset_amount, BASE_PRECISION)} @ "  # type: ignore
