@@ -6,6 +6,7 @@ from typing import Optional, Union
 from dataclasses import dataclass
 
 from solana.rpc.types import TxOpts
+from solana.rpc.core import _COMMITMENT_TO_SOLDERS
 
 from solana.transaction import Transaction
 
@@ -16,6 +17,9 @@ from solders.address_lookup_table_account import AddressLookupTableAccount
 from solders.pubkey import Pubkey
 from solders.keypair import Keypair
 from solders.compute_budget import set_compute_unit_limit
+from solders.rpc.config import RpcSimulateTransactionConfig
+from solders.rpc.requests import SimulateVersionedTransaction
+from solders.rpc.responses import SimulateTransactionResp
 
 from driftpy.drift_client import DriftClient
 from driftpy.tx.standard_tx_sender import StandardTxSender
@@ -167,17 +171,21 @@ async def simulate_and_get_tx_with_cus(
         ixs, drift_client.wallet.payer, lookup_tables, additional_signers  # type: ignore
     )
 
-    print(f"type: {type(tx)}")
-    print(f"isinstance transaction: {isinstance(tx, Transaction)}")
-
     if not do_sim:
         return SimulateAndGetTxWithCUsResponse(-1, tx)
 
     try:
         start = time.time()
 
-        resp = await drift_client.connection.simulate_transaction(
-            tx, commitment=drift_client.connection.commitment
+        # manually simulate transaction because we need replace recent blockhash, which AsyncClient.simulate_transaction() doesn't expose
+        commitment = _COMMITMENT_TO_SOLDERS[drift_client.connection.commitment]
+        config = RpcSimulateTransactionConfig(
+            commitment=commitment, replace_recent_blockhash=True
+        )
+        body = SimulateVersionedTransaction(tx, config)
+
+        resp = await drift_client.connection._provider.make_request(
+            body, SimulateTransactionResp
         )
 
         if log_sim_duration:
@@ -185,9 +193,6 @@ async def simulate_and_get_tx_with_cus(
 
     except Exception as e:
         logger.error(e)
-
-    print(resp)
-    print(resp.value.units_consumed)
 
     if not resp:
         raise ValueError("Failed to simulate transaction")

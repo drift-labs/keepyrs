@@ -106,7 +106,7 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
             continue
         logger.info(
             log_message_for_node_to_fill(
-                node, f"Filling perp node {idx} (fill tx id: {fill_tx_id})"
+                node, f"Filling perp node {idx} (fill tx id: {fill_tx_id}) order slot: {node.node.order.slot}"  # type: ignore
             )
         )
 
