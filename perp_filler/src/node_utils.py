@@ -4,7 +4,7 @@ import logging
 from typing import Optional, Tuple
 from dataclasses import dataclass
 
-from solders.pubkey import Pubkey
+from solders.pubkey import Pubkey  # type: ignore
 
 from driftpy.dlob.dlob import DLOB, NodeToTrigger, NodeToFill, DLOBNode
 from driftpy.types import (
@@ -44,8 +44,9 @@ from perp_filler.src.utils import (
 from perp_filler.src.constants import *
 from perp_filler.src.maker_utils import select_makers
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from custom_log import get_custom_logger
+
+logger = get_custom_logger(__name__)
 
 
 @dataclass

@@ -34,8 +34,9 @@ from perp_filler.src.fill_utils import *
 from perp_filler.src.node_utils import *
 from perp_filler.src.utils import *
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from custom_log import get_custom_logger
+
+logger = get_custom_logger(__name__)
 
 
 class PerpFiller(PerpFillerConfig):
@@ -158,6 +159,9 @@ class PerpFiller(PerpFillerConfig):
                 fillable_nodes = []
                 triggerable_nodes = []
                 for market in self.drift_client.get_perp_market_accounts():
+                    # filter out all markets that aren't actively trading
+                    if not is_variant(market.status, "Active"):
+                        continue
                     try:
                         nodes_to_fill, nodes_to_trigger = get_perp_nodes_for_market(
                             self, market, dlob
@@ -231,7 +235,6 @@ class PerpFiller(PerpFillerConfig):
                         self.drift_client.tx_sender,
                         self.lookup_tables,
                         [],
-                        None,
                         SIM_CU_ESTIMATE_MULTIPLIER,
                         True,
                         self.simulate_tx_for_cu_estimate,
@@ -260,6 +263,10 @@ class PerpFiller(PerpFillerConfig):
                     # TODO
                     pass
                 self.last_settle_pnl = now
+        else:
+            logger.warning(
+                f"active positions less than max, actual: {len(market_indexes)}, max: {MAX_POSITIONS_PER_USER}"
+            )
 
     async def log_throttled(self):
         logger.info("THROTTLED STATS:")

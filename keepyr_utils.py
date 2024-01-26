@@ -8,18 +8,16 @@ from dataclasses import dataclass
 from solana.rpc.types import TxOpts
 from solana.rpc.core import _COMMITMENT_TO_SOLDERS
 
-from solana.transaction import Transaction
-
-from solders.transaction import VersionedTransaction
-from solders.transaction_status import TransactionErrorType
-from solders.instruction import Instruction
-from solders.address_lookup_table_account import AddressLookupTableAccount
-from solders.pubkey import Pubkey
-from solders.keypair import Keypair
-from solders.compute_budget import set_compute_unit_limit
-from solders.rpc.config import RpcSimulateTransactionConfig
-from solders.rpc.requests import SimulateVersionedTransaction
-from solders.rpc.responses import SimulateTransactionResp
+from solders.transaction import VersionedTransaction  # type: ignore
+from solders.transaction_status import TransactionErrorType  # type: ignore
+from solders.instruction import Instruction  # type: ignore
+from solders.address_lookup_table_account import AddressLookupTableAccount  # type: ignore
+from solders.pubkey import Pubkey  # type: ignore
+from solders.keypair import Keypair  # type: ignore
+from solders.compute_budget import set_compute_unit_limit  # type: ignore
+from solders.rpc.config import RpcSimulateTransactionConfig  # type: ignore
+from solders.rpc.requests import SimulateVersionedTransaction  # type: ignore
+from solders.rpc.responses import SimulateTransactionResp  # type: ignore
 
 from driftpy.drift_client import DriftClient
 from driftpy.tx.standard_tx_sender import StandardTxSender
@@ -29,12 +27,21 @@ from driftpy.dlob.dlob_node import DLOBNode
 from driftpy.dlob.node_list import get_order_signature
 from driftpy.types import OraclePriceData, MarketType
 
+from custom_log import ColoredFormatter
+
 COMPUTE_BUDGET_PROGRAM = Pubkey.from_string(
     "ComputeBudget111111111111111111111111111111"
 )
 
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+
+ch.setFormatter(ColoredFormatter())
+
+logger.addHandler(ch)
 
 
 @dataclass
@@ -153,7 +160,6 @@ async def simulate_and_get_tx_with_cus(
     tx_sender: StandardTxSender,
     lookup_tables: AddressLookupTableAccount,
     additional_signers: list[Keypair],
-    opts: Optional[TxOpts] = None,
     cu_limit_multiplier: float = 1.0,
     log_sim_duration: bool = False,
     do_sim: bool = True,

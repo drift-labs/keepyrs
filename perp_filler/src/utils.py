@@ -3,9 +3,9 @@ import time
 
 from typing import Optional
 
-from solders.instruction import Instruction
-from solders.pubkey import Pubkey
-from solders.rpc.responses import GetSlotResp
+from solders.instruction import Instruction  # type: ignore
+from solders.pubkey import Pubkey  # type: ignore
+from solders.rpc.responses import GetSlotResp  # type: ignore
 
 from driftpy.dlob.dlob import NodeToFill, NodeToTrigger, DLOB
 from driftpy.types import UserAccount
@@ -30,8 +30,9 @@ from keepyr_parse import (
 
 from perp_filler.src.constants import *
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from custom_log import get_custom_logger
+
+logger = get_custom_logger(__name__)
 
 
 def get_latest_slot(perp_filler) -> int:

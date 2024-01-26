@@ -4,11 +4,10 @@ import time
 
 from typing import Set
 
-from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
-from solders.instruction import Instruction
-from solders.transaction import VersionedTransaction
-from solders.transaction_status import TransactionErrorType
-from solders.pubkey import Pubkey
+from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price  # type: ignore
+from solders.instruction import Instruction  # type: ignore
+from solders.transaction import VersionedTransaction  # type: ignore
+from solders.pubkey import Pubkey  # type: ignore
 
 from driftpy.dlob.dlob import NodeToFill, NodeToTrigger
 from driftpy.types import is_variant, MakerInfo, Order
@@ -32,8 +31,9 @@ from perp_filler.src.utils import (
 )
 from perp_filler.src.node_utils import get_node_fill_info, get_user_account_from_map
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from custom_log import get_custom_logger
+
+logger = get_custom_logger(__name__)
 
 
 async def execute_fillable_perp_nodes_for_market(perp_filler, nodes: list[NodeToFill]):
@@ -76,7 +76,6 @@ async def execute_triggerable_perp_nodes_for_market(
             perp_filler.drift_client.tx_sender,
             perp_filler.lookup_tables,
             [],
-            None,
             SIM_CU_ESTIMATE_MULTIPLIER,
             True,
             perp_filler.simulate_tx_for_cu_estimate,
@@ -278,7 +277,6 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
             perp_filler.drift_client.tx_sender,
             perp_filler.lookup_tables,
             [],
-            None,
             SIM_CU_ESTIMATE_MULTIPLIER,
             True,
             perp_filler.simulate_tx_for_cu_estimate,
@@ -384,7 +382,6 @@ async def try_fill_multi_maker_perp_nodes(perp_filler, node: NodeToFill):
                 perp_filler.drift_client.tx_sender,
                 perp_filler.lookup_tables,
                 [],
-                None,
                 SIM_CU_ESTIMATE_MULTIPLIER,
                 True,
                 perp_filler.simulate_tx_for_cu_estimate,
@@ -437,8 +434,8 @@ async def send_fill_tx_and_parse_logs(
     start = time.time()
     try:
         tx_resp: TxSigAndSlot = await perp_filler.drift_client.tx_sender.send(tx)
-        logger.info(f"sent fill tx: {tx_resp.tx_sig} (fill tx id: {fill_tx_id})")
-        logger.info(f"took: {time.time() - start}s")
+        logger.success(f"sent fill tx: {tx_resp.tx_sig} (fill tx id: {fill_tx_id})")
+        logger.success(f"took: {time.time() - start}s")
     except Exception as e:
         if "RevertFill" in str(e):
             logger.info(f"Fill reverted (fill tx id: {fill_tx_id})")
