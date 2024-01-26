@@ -2,16 +2,31 @@ import logging
 import time
 
 from typing import Optional
-from dataclasses import dataclass
 
 from solders.instruction import Instruction
+from solders.pubkey import Pubkey
+from solders.rpc.responses import GetSlotResp
 
 from driftpy.dlob.dlob import NodeToFill, NodeToTrigger, DLOB
 from driftpy.types import UserAccount
 from driftpy.constants import *
 from driftpy.math.conversion import convert_to_number
 
-from keepyr_utils import get_node_to_fill_signature, get_node_to_trigger_signature
+from keepyr_utils import (
+    get_fill_signature_from_user_account_and_order_id,
+    get_node_to_fill_signature,
+    get_node_to_trigger_signature,
+)
+from keepyr_parse import (
+    is_end_ix_log,
+    is_fill_ix_log,
+    is_ix_log,
+    is_order_does_not_exist_log,
+    is_taker_breached_maintenance_margin_log,
+    is_maker_breached_maintenance_margin_log,
+    is_err_filling_log,
+    is_err_stale_oracle,
+)
 
 from perp_filler.src.constants import *
 
@@ -20,7 +35,15 @@ logger = logging.getLogger(__name__)
 
 
 def get_latest_slot(perp_filler) -> int:
-    return max(perp_filler.slot_subscriber.get_slot(), perp_filler.user_map.latest_slot)
+    slot_sub_slot = perp_filler.slot_subscriber.get_slot()
+    if isinstance(
+        slot_sub_slot, GetSlotResp
+    ):  # i don't know why this sometimes happens
+        return max(slot_sub_slot.value, perp_filler.user_map.get_slot())
+    else:
+        return max(
+            perp_filler.slot_subscriber.get_slot(), perp_filler.user_map.get_slot()
+        )
 
 
 def remove_throttled_node(perp_filler, sig: str):
@@ -44,7 +67,7 @@ def prune_throttled_nodes(perp_filler):
     nodes_to_prune = {}
 
     if len(perp_filler.throttled_nodes) > THROTTLED_NODE_SIZE_TO_PRUNE:
-        for key, val in perp_filler.throttled_nodes:
+        for key, val in perp_filler.throttled_nodes.items():
             if val + 2 * (FILL_ORDER_BACKOFF // 1_000) > time.time():
                 nodes_to_prune[key] = val
 
@@ -116,6 +139,9 @@ def log_message_for_node_to_fill(node: NodeToFill, prefix: Optional[str]) -> str
 
     msg = ""
 
+    if prefix:
+        msg += prefix + " "
+
     msg += (
         f"taker on market {order.market_index}: {taker.user_account}-"  # type: ignore
         f"{order.order_id} {str(order.direction)} "  # type: ignore
@@ -145,3 +171,146 @@ def log_message_for_node_to_fill(node: NodeToFill, prefix: Optional[str]) -> str
         msg += "  vAMM"
 
     return msg
+
+
+async def handle_transaction_logs(
+    perp_filler, nodes: list[NodeToFill], logs: Optional[list[str]] = None
+):
+    if not logs:
+        return 0
+
+    in_fill_ix = False
+    error_this_fill_ix = False
+    ix_idx = -1  # skip cu budget program
+    success_count = 0
+    bursted = False
+    for log in logs:
+        if not log:
+            logger.error("Log is None")
+            continue
+
+        if "exceeded maximum number of instructions allowed" in log:
+            # switch to burst cu limit temporarily
+            perp_filler.use_burst_cu_limit = True
+            perp_filler.fill_tx_since_burst_cu = 0
+            bursted = True
+            continue
+
+        if is_end_ix_log(str(perp_filler.drift_client.program_id), log):
+            if not error_this_fill_ix:
+                success_count += 1
+
+                in_fill_ix = False
+                error_this_fill_ix = False
+                continue
+
+        if is_ix_log(log):
+            if is_fill_ix_log(log):
+                in_fill_ix = True
+                error_this_fill_ix = False
+                ix_idx += 1
+                if ix_idx < len(nodes):
+                    node = nodes[ix_idx]
+                    logger.info(
+                        log_message_for_node_to_fill(
+                            node, f"Processing tx log for assoc node: {ix_idx}"
+                        )
+                    )
+                else:
+                    ix_idx -= 1
+                    continue
+            else:
+                in_fill_ix = False
+            continue
+
+        if not in_fill_ix:
+            # this is not a log for a fill ix
+            continue
+
+        order_dne = is_order_does_not_exist_log(log)
+        if order_dne:
+            node = nodes[ix_idx]
+            if node:
+                logger.error(
+                    f"assoc node (ix idx: {ix_idx}): "
+                    f"{str(node.node.user_account)}-{node.node.order.order_id} "  # type: ignore
+                    f"dne, already filled"
+                )
+                set_throttled_node(perp_filler, get_node_to_fill_signature(node))
+                error_this_fill_ix = True
+                continue
+
+        maker_breached = is_maker_breached_maintenance_margin_log(log)
+        if maker_breached:
+            logger.error(
+                f"Throttling maker breached maint. mrgn: {maker_breached} ix idx: {ix_idx}"
+            )
+            set_throttled_node(perp_filler, maker_breached)
+            maker_pubkey = Pubkey.from_string(maker_breached)
+            user_account = await get_user_account_from_map(perp_filler, maker_breached)
+            try:
+                tx_sig = await perp_filler.drift_client.force_cancel_orders(
+                    maker_pubkey, user_account
+                )
+                logger.info(
+                    f"Force cancelled orders for maker {user_account} due to breach of maint. mrgn"
+                )
+                logger.info(f"tx sig: {tx_sig}")
+            except Exception as e:
+                logger.error(f"Failed to force cancel orders for maker: {node.node.user_account}")  # type: ignore
+                logger.error(f"Error: {e}")
+
+            error_this_fill_ix = True
+            break
+
+        taker_breached = is_taker_breached_maintenance_margin_log(log)
+        if taker_breached and nodes[ix_idx]:
+            node = nodes[ix_idx]
+            taker_node_sig = node.node.user_account  # type: ignore
+            user_account = await get_user_account_from_map(perp_filler, taker_node_sig)
+            logger.error(
+                f"Throttling taker breached maint. mrgn: {taker_node_sig} ix idx: {ix_idx}"
+            )
+            set_throttled_node(perp_filler, taker_node_sig)
+            try:
+                tx_sig = await perp_filler.drift_client.force_cancel_orders(
+                    Pubkey.from_string(taker_node_sig), user_account
+                )
+                logger.info(
+                    f"Force cancelled orders for maker {user_account} due to breach of maint. mrgn"
+                )
+                logger.info(f"tx sig: {tx_sig}")
+            except Exception as e:
+                logger.error(f"Failed to force cancel orders for taker: {node.node.user_account}")  # type: ignore
+                logger.error(f"Error: {e}")
+            error_this_fill_ix = True
+            continue
+
+        err_filling_log = is_err_filling_log(log)
+        if err_filling_log:
+            order_id = err_filling_log[0]
+            user_acc = err_filling_log[1]
+            extracted_sig = get_fill_signature_from_user_account_and_order_id(
+                user_acc, order_id
+            )
+            set_throttled_node(perp_filler, extracted_sig)
+
+            node = nodes[ix_idx]
+            assoc_sig = get_node_to_fill_signature(node)
+            logger.warning(
+                f"throttling node due to fill error. extracted sig: {extracted_sig} assoc. node sig: {assoc_sig} node idx: {ix_idx}"
+            )
+            error_this_fill_ix = True
+            continue
+
+        if is_err_stale_oracle(log):
+            logger.error(f"stale oracle error: {log}")
+            error_this_fill_ix = True
+            continue
+
+    if not bursted:
+        if perp_filler.fill_tx_since_burst_cu > TX_COUNT_COOLDOWN_ON_BURST:
+            perp_filler.use_burst_cu_limit = False
+        perp_filler.fill_tx_since_burst_cu += 1
+
+    return success_count

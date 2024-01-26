@@ -26,7 +26,6 @@ from driftpy.priority_fees.priority_fee_subscriber import (
     PriorityFeeConfig,
 )
 from driftpy.keypair import load_keypair
-from driftpy.constants.config import configs
 
 from keepyr_types import PerpFillerConfig
 
@@ -88,6 +87,8 @@ class PerpFiller(PerpFillerConfig):
         self.priority_fee_subscriber = PriorityFeeSubscriber(pf_config)
 
         self.fill_tx_id = 0
+        self.fill_tx_since_burst_cu = 0
+        self.last_settle_pnl = 0
 
     async def init(self):
         logger.info(f"Initializing {self.name}")
@@ -133,6 +134,7 @@ class PerpFiller(PerpFillerConfig):
                 self.spawn(self.settle_pnls, SETTLE_POSITIVE_PNL_COOLDOWN_MS // 1_000)
             )
         )
+        self.tasks.append(asyncio.create_task(self.spawn(self.log_throttled, 30)))
         logger.info(f"{self.name} Bot started!")
 
     async def spawn(self, func: Callable, interval: int):
@@ -202,6 +204,68 @@ class PerpFiller(PerpFillerConfig):
 
     async def settle_pnls(self):
         logger.info("Settle PnLs started")
+        user = self.drift_client.get_user()
+        market_indexes = [pos.market_index for pos in user.get_active_perp_positions()]
+        now = time.time()
+        if len(market_indexes) == MAX_POSITIONS_PER_USER:
+            if now < self.last_settle_pnl + (SETTLE_POSITIVE_PNL_COOLDOWN_MS // 1_000):
+                logger.info("Tried to settle positive PnL, but still cooling down...")
+            else:
+                settle_tasks = []
+                for i in range(0, len(market_indexes), SETTLE_PNL_CHUNKS):
+                    chunk = market_indexes[i : i + SETTLE_PNL_CHUNKS]
+                try:
+                    ixs = [set_compute_unit_limit(MAX_CU_PER_TX)]
+
+                    settle_ixs = await self.drift_client.get_settle_pnl_ixs(
+                        user.user_public_key,
+                        self.drift_client.get_user_account(),
+                        chunk,
+                    )
+
+                    ixs.append(settle_ixs)
+
+                    sim_result = await simulate_and_get_tx_with_cus(
+                        ixs,
+                        self.drift_client,
+                        self.drift_client.tx_sender,
+                        self.lookup_tables,
+                        [],
+                        None,
+                        SIM_CU_ESTIMATE_MULTIPLIER,
+                        True,
+                        self.simulate_tx_for_cu_estimate,
+                    )
+                    logger.info(f"settle_pnls estimate CUs: {sim_result.cu_estimate}")
+                    if self.simulate_tx_for_cu_estimate and sim_result.sim_error:
+                        logger.error(f"settle_pnls sim error: {sim_result.sim_error}")
+                    else:
+                        settle_tasks.append(
+                            asyncio.create_task(
+                                self.drift_client.tx_sender.send(sim_result.tx)
+                            )
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"error occurred settling pnl for markets {chunk}: {e}"
+                    )
+                    pass
+
+                try:
+                    results = await asyncio.gather(*settle_tasks)
+                    for result in results:
+                        logger.info(f"settled pnl, tx sig: {result.tx_sig}")
+                except Exception as e:
+                    logger.error(f"error settling positive pnls: {e}")
+                    # TODO
+                    pass
+                self.last_settle_pnl = now
+
+    async def log_throttled(self):
+        logger.info("THROTTLED STATS:")
+        logger.info(f"{len(self.throttled_nodes)} nodes throttled")
+        for key, val in self.throttled_nodes.items():
+            logger.info(f"throttled node: {key} -> {val}")
 
 
 async def main():
@@ -219,7 +283,7 @@ async def main():
         wallet,
         "mainnet",
         account_subscription=AccountSubscriptionConfig("websocket"),
-        tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
+        tx_params=TxParams(1_400_000, 20_000),  # crank priority fees way up
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -228,7 +292,10 @@ async def main():
     await usermap.subscribe()
 
     perp_filler_config = PerpFillerConfig(
-        "perp filler", simulate_tx_for_cu_estimate=True, use_burst_cu_limit=True
+        "perp filler",
+        simulate_tx_for_cu_estimate=False,
+        use_burst_cu_limit=False,
+        revert_on_failure=True,
     )
 
     perp_filler = PerpFiller(perp_filler_config, drift_client, usermap)

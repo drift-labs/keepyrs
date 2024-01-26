@@ -23,7 +23,10 @@ from driftpy.math.orders import (
     calculate_base_asset_amount_for_amm_to_fulfill,
 )
 from driftpy.math.oracles import is_oracle_valid
-from driftpy.addresses import get_user_stats_account_public_key
+from driftpy.addresses import (
+    get_user_stats_account_public_key,
+    get_user_account_public_key,
+)
 from driftpy.accounts.get_accounts import get_user_stats_account
 
 from keepyr_types import MakerNodeMap
@@ -128,6 +131,7 @@ def filter_perp_nodes_for_market(
 ) -> Tuple[list[NodeToFill], list[NodeToTrigger]]:
     seen_fillable: set[str] = set()
     filtered_fillable: list[NodeToFill] = []
+    filtered_fillable_count = 0
 
     for fillable_node in fillable:
         sig = get_node_to_fill_signature(fillable_node)
@@ -135,9 +139,12 @@ def filter_perp_nodes_for_market(
             seen_fillable.add(sig)
             if filter_fillable(perp_filler, fillable_node):
                 filtered_fillable.append(fillable_node)
+            else:
+                filtered_fillable_count += 1
 
     seen_triggerable: set[str] = set()
     filtered_triggerable: list[NodeToTrigger] = []
+    filtered_triggerable_count = 0
 
     for triggerable_node in triggerable:
         sig = get_node_to_trigger_signature(triggerable_node)
@@ -145,6 +152,11 @@ def filter_perp_nodes_for_market(
             seen_triggerable.add(sig)
             if filter_triggerable(perp_filler, triggerable_node):
                 filtered_triggerable.append(triggerable_node)
+            else:
+                filtered_triggerable_count += 1
+
+    logger.info(f"Filtered out {filtered_fillable_count} fillable nodes")
+    logger.info(f"Filtered out {filtered_triggerable_count} triggerable nodes")
 
     return (filtered_fillable, filtered_triggerable)
 
@@ -213,12 +225,13 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
     )
 
     if is_maker_empty and is_perp_market_type and is_not_fillable:
-        logger.warning(
-            f"filtered out unfillable node on market {market_index} for user {user_account}-{order_id}"
-        )
-        logger.warning(f" . no maker node: {is_maker_empty}")
-        logger.warning(f" . is perp: {is_perp_market_type}")
-        logger.warning(f" . is not fillable by vamm: {is_not_fillable}")
+        # I really don't like the logs in here, they crowd up my terminal to the point where I can't find logs that matter
+        # logger.warning(
+        #     f"filtered out unfillable node on market {market_index} for user {user_account}-{order_id}"
+        # )
+        # logger.warning(f" . no maker node: {is_maker_empty}")
+        # logger.warning(f" . is perp: {is_perp_market_type}")
+        # logger.warning(f" . is not fillable by vamm: {is_not_fillable}")
 
         base_fulfilled = calculate_base_asset_amount_for_amm_to_fulfill(
             node.node.order,  # type: ignore
@@ -226,9 +239,9 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
             oracle_price_data,  # type: ignore
             get_latest_slot(perp_filler),
         )
-        logger.warning(
-            f" . calculate_base_asset_amount_for_amm_to_fulfill: {base_fulfilled}"
-        )
+        # logger.warning(
+        #     f" . calculate_base_asset_amount_for_amm_to_fulfill: {base_fulfilled}"
+        # )
         return False
 
     if is_maker_empty:
@@ -313,7 +326,9 @@ def get_referrer_info(
         return None
     else:
         return ReferrerInfo(
-            taker_stats.referrer,
+            get_user_account_public_key(
+                perp_filler.drift_client.program_id, taker_stats.referrer, 0
+            ),
             get_user_stats_account_public_key(
                 perp_filler.drift_client.program_id, taker_stats.referrer
             ),

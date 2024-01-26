@@ -6,14 +6,19 @@ from typing import Set
 
 from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
 from solders.instruction import Instruction
+from solders.transaction import VersionedTransaction
+from solders.transaction_status import TransactionErrorType
+from solders.pubkey import Pubkey
 
 from driftpy.dlob.dlob import NodeToFill, NodeToTrigger
-from driftpy.types import is_variant
+from driftpy.types import is_variant, MakerInfo, Order
+from driftpy.tx.types import TxSigAndSlot
 from driftpy.addresses import get_user_account_public_key
 
 from keepyr_utils import (
     COMPUTE_BUDGET_PROGRAM,
     get_node_to_fill_signature,
+    get_node_to_trigger_signature,
     simulate_and_get_tx_with_cus,
 )
 
@@ -21,10 +26,11 @@ from perp_filler.src.constants import *
 from perp_filler.src.utils import (
     calc_compact_u16_encoded_size,
     calc_ix_encoded_size,
+    handle_transaction_logs,
     log_message_for_node_to_fill,
     log_slots,
 )
-from perp_filler.src.node_utils import get_node_fill_info
+from perp_filler.src.node_utils import get_node_fill_info, get_user_account_from_map
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,12 +50,74 @@ async def execute_triggerable_perp_nodes_for_market(
     perp_filler, nodes: list[NodeToTrigger]
 ):
     logger.info(f"triggering {len(nodes)} nodes")
+    for node in nodes:
+        node.node.have_trigger = True
+        user_account: Pubkey = node.node.user_account  # type: ignore
+        order: Order = node.node.order  # type: ignore
+        logger.info(
+            f"trying to trigger: account: {str(user_account)} order: {order.order_id}"
+        )
+        user = await get_user_account_from_map(perp_filler, str(user_account))
+
+        perp_filler.triggering_nodes[get_node_to_trigger_signature(node)] = time.time()
+
+        ixs: list[Instruction] = []
+
+        ix = perp_filler.drift_client.get_trigger_order_ix(user_account, user, order)
+
+        ixs.append(ix)
+
+        if perp_filler.revert_on_failure:
+            ixs.append(perp_filler.drift_client.get_revert_fill_ix())
+
+        sim_result = await simulate_and_get_tx_with_cus(
+            ixs,
+            perp_filler.drift_client,
+            perp_filler.drift_client.tx_sender,
+            perp_filler.lookup_tables,
+            [],
+            None,
+            SIM_CU_ESTIMATE_MULTIPLIER,
+            True,
+            perp_filler.simulate_tx_for_cu_estimate,
+        )
+
+        logger.info(
+            f"execute_triggerable_perp_nodes_for_market estimated CUs: {sim_result.cu_estimate}"
+        )
+
+        if perp_filler.simulate_tx_for_cu_estimate and sim_result.sim_error:
+            logger.error(
+                f"execute_triggerable_perp_nodes_for_market simerror: {sim_result.sim_error}"
+            )
+        else:
+            try:
+                tx_sig_and_slot: TxSigAndSlot = perp_filler.drift_client.tx_sender.send(
+                    sim_result.tx
+                )
+                logger.info(
+                    f"triggered node account: {str(user_account)} order: {order.order_id}"
+                )
+                logger.info(f"tx sig: {tx_sig_and_slot.tx_sig}")
+
+            except Exception as e:
+                node.node.have_trigger = False
+                logger.error(
+                    f"Failed to trigger node: {get_node_to_trigger_signature(node)}"
+                )
+                logger.error(f"Error: {e}")
+
+            finally:
+                perp_filler.remove_triggering_node(node)
 
 
 async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
-    micro_lamports = min(
-        math.floor(perp_filler.priority_fee_subscriber.max_priority_fee),
-        MAX_CU_PRICE_MICRO_LAMPORTS,
+    micro_lamports = (
+        min(
+            math.floor(perp_filler.priority_fee_subscriber.max_priority_fee),
+            MAX_CU_PRICE_MICRO_LAMPORTS,
+        )
+        or MAX_CU_PRICE_MICRO_LAMPORTS
     )
     ixs = [
         set_compute_unit_limit(MAX_CU_PER_TX),
@@ -96,12 +164,13 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
     nodes_sent: list[NodeToFill] = []
     idx_used = 0
     starting_size = len(ixs)
-    fill_tx_id = perp_filler.fill_tx_id + 1
+    fill_tx_id = perp_filler.fill_tx_id
+    perp_filler.fill_tx_id += 1
 
     for idx, node in enumerate(nodes):
         if len(node.maker) > 1:
             # do multi maker fills in a separate tx since they're larger
-            # await try_fill_multi_maker_perp_nodes(node)
+            await try_fill_multi_maker_perp_nodes(perp_filler, node)
             nodes_sent.append(node)
             continue
         logger.info(
@@ -219,15 +288,159 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
             f"try bulk fill estimate CUs: {sim_result.cu_estimate} (fill tx id: {fill_tx_id})"
         )
 
+        if (
+            int(sim_result.cu_estimate) < 50_000
+            and sim_result.cu_estimate > 0
+            and not sim_result.sim_error
+        ):
+            logger.warning("CU estimate very low (< 50,000)")
+            logger.warning(f"CUs consumed: {sim_result.cu_estimate}")
+            logger.warning("Possible error in transaction simulation")
+            logger.warning("Simulation logs:")
+            logger.warning(sim_result.sim_tx_logs)
+
         if perp_filler.simulate_tx_for_cu_estimate and sim_result.sim_error:
             logger.error(
                 f"sim error: {str(sim_result.sim_error)} (fill tx id: {fill_tx_id})"
             )
             if sim_result.sim_tx_logs:
-                # TODO handle tx logs
+                await handle_transaction_logs(
+                    perp_filler, [node], sim_result.sim_tx_logs
+                )
                 pass
         else:
-            # TODO send transaction
+            await send_fill_tx_and_parse_logs(perp_filler, fill_tx_id, sim_result.tx)
             pass
 
     return len(nodes_sent)
+
+
+async def try_fill_multi_maker_perp_nodes(perp_filler, node: NodeToFill):
+    micro_lamports = (
+        min(
+            math.floor(perp_filler.priority_fee_subscriber.max_priority_fee),
+            MAX_CU_PRICE_MICRO_LAMPORTS,
+        )
+        or MAX_CU_PRICE_MICRO_LAMPORTS
+    )
+    ixs = [
+        set_compute_unit_limit(MAX_CU_PER_TX),
+        set_compute_unit_price(micro_lamports),
+    ]
+
+    fill_tx_id = perp_filler.fill_tx_id
+    perp_filler.fill_tx_id += 1
+
+    logger.info(
+        log_message_for_node_to_fill(
+            node,
+            f"filling multi maker perp node with {len(node.maker)} makers (fill tx id: {fill_tx_id})",
+        )
+    )
+
+    log_slots(perp_filler)
+
+    try:
+        node_fill_info = await get_node_fill_info(perp_filler, node)
+        maker_infos = node_fill_info.maker_infos
+        taker_user = node_fill_info.taker_user_account
+        referrer_info = node_fill_info.referrer_info
+        market_type = node_fill_info.market_type
+
+        if not is_variant(market_type, "Perp"):
+            raise ValueError("Expected perp market type")
+
+        async def build_tx_with_maker_infos(makers: list[MakerInfo]):
+            start = time.time()
+
+            taker_pubkey = get_user_account_public_key(
+                perp_filler.drift_client.program_id,
+                taker_user.authority,
+                taker_user.sub_account_id,
+            )
+
+            ix: Instruction = await perp_filler.drift_client.get_fill_perp_order_ix(
+                taker_pubkey,
+                taker_user,
+                node.node.order,  # type: ignore
+                makers,
+                referrer_info,
+            )
+
+            ixs.append(ix)
+
+            perp_filler.filling_nodes[get_node_to_fill_signature(node)] = time.time()
+
+            if perp_filler.revert_on_failure:
+                ixs.append(perp_filler.drift_client.get_revert_fill_ix())
+
+            logger.info(
+                f"build_tx_with_maker_infos took {time.time() - start}s (fill tx id: {fill_tx_id})"
+            )
+
+            return await simulate_and_get_tx_with_cus(
+                ixs,
+                perp_filler.drift_client,
+                perp_filler.drift_client.tx_sender,
+                perp_filler.lookup_tables,
+                [],
+                None,
+                SIM_CU_ESTIMATE_MULTIPLIER,
+                True,
+                perp_filler.simulate_tx_for_cu_estimate,
+            )
+
+        sim_result = await build_tx_with_maker_infos(maker_infos)
+        tx_accounts = len(sim_result.tx.message.account_keys)
+        attempt = 0
+
+        while tx_accounts > MAX_ACCOUNTS_PER_TX and maker_infos > 0:
+            logger.info(
+                f"(fill tx id: {fill_tx_id} attempt: {attempt}) too many accounts, removing 1 and trying again "
+                f"has {len(maker_infos)} makers and {tx_accounts} accounts"
+            )
+            maker_infos = maker_infos[:-1]
+            sim_result = await build_tx_with_maker_infos(maker_infos)
+            tx_accounts = len(sim_result.tx.message.account_keys)
+
+        if len(maker_infos) == 0:
+            logger.error(
+                f"No makerinfos left to use for multi maker node (fill tx id: {fill_tx_id})"
+            )
+            return
+
+        logger.info(
+            f"try_fill_multi_maker_perp_nodes estimated CUs: {sim_result.cu_estimate} (fill tx id: {fill_tx_id})"
+        )
+
+        if perp_filler.simulate_tx_for_cu_estimate and sim_result.sim_error:
+            logger.error(
+                f"sim error: {str(sim_result.sim_error)} (fill tx id: {fill_tx_id})"
+            )
+            if sim_result.sim_tx_logs:
+                await handle_transaction_logs(
+                    perp_filler, [node], sim_result.sim_tx_logs
+                )
+                pass
+        else:
+            await send_fill_tx_and_parse_logs(perp_filler, fill_tx_id, sim_result.tx)
+            pass
+
+    except Exception as e:
+        logger.error(f"Error filling multi maker perp node (fill tx id: {fill_tx_id})")
+        logger.error(e)
+
+
+async def send_fill_tx_and_parse_logs(
+    perp_filler, fill_tx_id: int, tx: VersionedTransaction
+):
+    start = time.time()
+    try:
+        tx_resp: TxSigAndSlot = await perp_filler.drift_client.tx_sender.send(tx)
+        logger.info(f"sent fill tx: {tx_resp.tx_sig} (fill tx id: {fill_tx_id})")
+        logger.info(f"took: {time.time() - start}s")
+    except Exception as e:
+        if "RevertFill" in str(e):
+            logger.info(f"Fill reverted (fill tx id: {fill_tx_id})")
+        else:
+            logger.critical(f"Failed to send fill transaction: {e}")

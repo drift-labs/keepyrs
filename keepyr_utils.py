@@ -158,6 +158,8 @@ async def simulate_and_get_tx_with_cus(
     log_sim_duration: bool = False,
     do_sim: bool = True,
 ):
+    str_err: Optional[str] = None
+
     if len(ixs) == 0:
         raise ValueError("cannot simulate empty tx")
 
@@ -201,6 +203,13 @@ async def simulate_and_get_tx_with_cus(
         raise ValueError("Failed to get CUs from simulate transaction")
 
     sim_tx_logs = resp.value.logs
+
+    order_not_exist = any("Order does not exist" in log for log in sim_tx_logs)
+
+    if order_not_exist:
+        logger.error("Order already filled")
+        str_err = "Order already filled"
+
     cu_estimate = resp.value.units_consumed
 
     if set_cu_limit_ix_idx == -1:
@@ -214,4 +223,6 @@ async def simulate_and_get_tx_with_cus(
         ixs, drift_client.wallet.payer, lookup_tables, additional_signers  # type: ignore
     )
 
-    return SimulateAndGetTxWithCUsResponse(cu_estimate, tx, sim_tx_logs, resp.value.err)
+    return SimulateAndGetTxWithCUsResponse(
+        cu_estimate, tx, sim_tx_logs, resp.value.err or str_err
+    )
