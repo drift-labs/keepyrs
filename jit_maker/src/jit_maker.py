@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 from aiohttp import web
 
 from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Commitment
+from solana.rpc.types import TxOpts
 from solders.pubkey import Pubkey
 
 from anchorpy import Wallet
@@ -459,12 +461,14 @@ async def main():
 
     connection = AsyncClient(url)
 
+    commitment = Commitment("processed")
     drift_client = DriftClient(
         connection,
         wallet,
         "mainnet",
-        account_subscription=AccountSubscriptionConfig("websocket"),
+        account_subscription=AccountSubscriptionConfig("websocket", commitment=commitment),
         tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
+        opts=TxOpts(skip_confirmation=False, preflight_commitment=commitment)
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -472,7 +476,7 @@ async def main():
 
     await usermap.subscribe()
 
-    auction_subscriber = AuctionSubscriber(AuctionSubscriberConfig(drift_client))
+    auction_subscriber = AuctionSubscriber(AuctionSubscriberConfig(drift_client, commitment))
 
     jit_proxy_client = JitProxyClient(
         drift_client,
