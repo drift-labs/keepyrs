@@ -230,7 +230,7 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
             BURST_CU_PER_FILL if perp_filler.use_burst_cu_limit else CU_PER_FILL
         )
         or_lhs = (
-            running_cu_used + new_ix_cost + additional_accounts_cost >= MAX_TX_PACK_SIZE
+            running_tx_size + new_ix_cost + additional_accounts_cost >= MAX_TX_PACK_SIZE
         )
         or_rhs = running_cu_used + cu_to_use_per_fill >= MAX_CU_PER_TX
         and_rhs = len(ixs) > starting_size + 1  # ensure at least 1 attempted fill

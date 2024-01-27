@@ -4,12 +4,24 @@ from typing import Union
 
 from driftpy.math.conversion import convert_to_number
 from driftpy.dlob.dlob_node import DLOBNode
-from driftpy.math.utils import div_ceil  # type: ignore
 
 from keepyr_types import MakerNodeMap
 from perp_filler.src.constants import MAX_MAKERS_PER_FILL
 
 PROBABILITY_PRECISION = 1_000
+
+
+def div_ceil(a: int, b: int) -> int:
+    if b == 0:
+        return a
+
+    quotient = a // b
+    remainder = a % b
+
+    if remainder > 0:
+        return quotient + 1
+    else:
+        return quotient
 
 
 def select_makers(maker_node_map: MakerNodeMap) -> MakerNodeMap:
