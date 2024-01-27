@@ -193,7 +193,7 @@ class PerpFiller(PerpFillerConfig):
                     ),
                 )
 
-                logger.info(f"done: {time.time() - start}s")
+                logger.success(f"done: {time.time() - start}s")
                 ran = True
         except Exception as e:
             logger.error(f"{e}")
@@ -201,7 +201,7 @@ class PerpFiller(PerpFillerConfig):
         finally:
             if ran:
                 duration = time.time() - start
-                logger.info(f"try_fill done, took {duration}s")
+                logger.success(f"try_fill done, took {duration}s")
 
                 async with self.watchdog:
                     self.watchdog_last_pat = time.time()
@@ -218,55 +218,64 @@ class PerpFiller(PerpFillerConfig):
                 settle_tasks = []
                 for i in range(0, len(market_indexes), SETTLE_PNL_CHUNKS):
                     chunk = market_indexes[i : i + SETTLE_PNL_CHUNKS]
-                try:
-                    ixs = [set_compute_unit_limit(MAX_CU_PER_TX)]
+                    try:
+                        ixs = [set_compute_unit_limit(MAX_CU_PER_TX)]
 
-                    settle_ixs = await self.drift_client.get_settle_pnl_ixs(
-                        user.user_public_key,
-                        self.drift_client.get_user_account(),
-                        chunk,
-                    )
+                        users = {
+                            user.user_public_key: self.drift_client.get_user_account()
+                        }
 
-                    ixs.append(settle_ixs)
-
-                    sim_result = await simulate_and_get_tx_with_cus(
-                        ixs,
-                        self.drift_client,
-                        self.drift_client.tx_sender,
-                        self.lookup_tables,
-                        [],
-                        SIM_CU_ESTIMATE_MULTIPLIER,
-                        True,
-                        self.simulate_tx_for_cu_estimate,
-                    )
-                    logger.info(f"settle_pnls estimate CUs: {sim_result.cu_estimate}")
-                    if self.simulate_tx_for_cu_estimate and sim_result.sim_error:
-                        logger.error(f"settle_pnls sim error: {sim_result.sim_error}")
-                    else:
-                        settle_tasks.append(
-                            asyncio.create_task(
-                                self.drift_client.tx_sender.send(sim_result.tx)
-                            )
+                        settle_ixs = self.drift_client.get_settle_pnl_ixs(
+                            users,
+                            chunk,
                         )
-                except Exception as e:
-                    logger.error(
-                        f"error occurred settling pnl for markets {chunk}: {e}"
-                    )
-                    pass
 
-                try:
-                    results = await asyncio.gather(*settle_tasks)
-                    for result in results:
-                        logger.info(f"settled pnl, tx sig: {result.tx_sig}")
-                except Exception as e:
-                    logger.error(f"error settling positive pnls: {e}")
-                    # TODO
-                    pass
-                self.last_settle_pnl = now
+                        ixs += settle_ixs
+
+                        sim_result = await simulate_and_get_tx_with_cus(
+                            ixs,
+                            self.drift_client,
+                            self.drift_client.tx_sender,
+                            self.lookup_tables,
+                            [],
+                            SIM_CU_ESTIMATE_MULTIPLIER,
+                            True,
+                            self.simulate_tx_for_cu_estimate,
+                        )
+                        logger.info(
+                            f"settle_pnls estimate CUs: {sim_result.cu_estimate}"
+                        )
+                        if self.simulate_tx_for_cu_estimate and sim_result.sim_error:
+                            logger.error(
+                                f"settle_pnls sim error: {sim_result.sim_error}"
+                            )
+                        else:
+                            settle_tasks.append(
+                                asyncio.create_task(
+                                    self.drift_client.tx_sender.send(sim_result.tx)
+                                )
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"error occurred settling pnl for markets {chunk}: {e}"
+                        )
+                        pass
+
+                    try:
+                        results = await asyncio.gather(*settle_tasks)
+                        for result in results:
+                            logger.success(f"settled pnl, tx sig: {result.tx_sig}")
+                    except Exception as e:
+                        logger.error(f"error settling positive pnls: {e}")
+                        # TODO
+                        pass
         else:
             logger.warning(
-                f"active positions less than max, actual: {len(market_indexes)}, max: {MAX_POSITIONS_PER_USER}"
+                f"active positions less than max (actual: {len(market_indexes)}, max: {MAX_POSITIONS_PER_USER})"
             )
+        self.last_settle_pnl = now
+        duration = time.time() - now
+        logger.success(f"settle_pnls done, took {duration}s")
 
     async def log_throttled(self):
         logger.info("THROTTLED STATS:")
