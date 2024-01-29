@@ -495,7 +495,7 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig("jit maker", [10], [0], MarketType.Perp())
+    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
 
     for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
