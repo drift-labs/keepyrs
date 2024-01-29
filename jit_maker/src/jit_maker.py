@@ -17,7 +17,7 @@ from solders.pubkey import Pubkey
 from anchorpy import Wallet
 
 from driftpy.slot.slot_subscriber import SlotSubscriber
-from driftpy.drift_client import DriftClient
+from driftpy.drift_client import DriftClient, DEFAULT_TX_OPTIONS
 from driftpy.account_subscription_config import AccountSubscriptionConfig
 from driftpy.auction_subscriber.auction_subscriber import AuctionSubscriber
 from driftpy.auction_subscriber.types import AuctionSubscriberConfig
@@ -29,6 +29,7 @@ from driftpy.types import is_variant, MarketType, TxParams
 from driftpy.constants.config import DriftEnv
 from driftpy.constants.numeric_constants import BASE_PRECISION
 from driftpy.keypair import load_keypair
+from driftpy.tx.fast_tx_sender import FastTxSender  # type: ignore
 
 from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
 from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
@@ -461,14 +462,19 @@ async def main():
 
     connection = AsyncClient(url)
 
+    fast_tx_sender = FastTxSender(connection, DEFAULT_TX_OPTIONS, 3)
+
     commitment = Commitment("processed")
     drift_client = DriftClient(
         connection,
         wallet,
         "mainnet",
-        account_subscription=AccountSubscriptionConfig("websocket", commitment=commitment),
+        account_subscription=AccountSubscriptionConfig(
+            "websocket", commitment=commitment
+        ),
         tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
-        opts=TxOpts(skip_confirmation=False, preflight_commitment=commitment)
+        opts=TxOpts(skip_confirmation=False, preflight_commitment=commitment),
+        tx_sender=fast_tx_sender,
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -476,14 +482,16 @@ async def main():
 
     await usermap.subscribe()
 
-    auction_subscriber = AuctionSubscriber(AuctionSubscriberConfig(drift_client, commitment))
+    auction_subscriber = AuctionSubscriber(
+        AuctionSubscriberConfig(drift_client, commitment)
+    )
 
     jit_proxy_client = JitProxyClient(
         drift_client,
         Pubkey.from_string("J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP"),
     )
 
-    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, False)
+    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
     jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
