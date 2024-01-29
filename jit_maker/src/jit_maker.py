@@ -462,9 +462,10 @@ async def main():
 
     connection = AsyncClient(url)
 
-    fast_tx_sender = FastTxSender(connection, DEFAULT_TX_OPTIONS, 3)
-
     commitment = Commitment("processed")
+    tx_opts = TxOpts(skip_confirmation=False, preflight_commitment=commitment)
+    fast_tx_sender = FastTxSender(connection, tx_opts, 3)
+
     drift_client = DriftClient(
         connection,
         wallet,
@@ -473,7 +474,7 @@ async def main():
             "websocket", commitment=commitment
         ),
         tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
-        opts=TxOpts(skip_confirmation=False, preflight_commitment=commitment),
+        opts=tx_opts,
         tx_sender=fast_tx_sender,
     )
 
@@ -494,7 +495,7 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
+    jit_maker_perp_config = JitMakerConfig("jit maker", [10], [0], MarketType.Perp())
 
     for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
