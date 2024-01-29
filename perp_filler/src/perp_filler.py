@@ -20,7 +20,7 @@ from driftpy.user_map.user_map import UserMap
 from driftpy.events.event_subscriber import EventSubscriber
 from driftpy.dlob.dlob_subscriber import DLOBSubscriber
 from driftpy.dlob.client_types import DLOBClientConfig
-from driftpy.types import TxParams
+from driftpy.types import TxParams, is_one_of_variant
 from driftpy.priority_fees.priority_fee_subscriber import (
     PriorityFeeSubscriber,
     PriorityFeeConfig,
@@ -135,7 +135,6 @@ class PerpFiller(PerpFillerConfig):
                 self.spawn(self.settle_pnls, SETTLE_POSITIVE_PNL_COOLDOWN_MS // 1_000)
             )
         )
-        self.tasks.append(asyncio.create_task(self.spawn(self.log_throttled, 30)))
         logger.info(f"{self.name} Bot started!")
 
     async def spawn(self, func: Callable, interval: int):
@@ -147,11 +146,12 @@ class PerpFiller(PerpFillerConfig):
             pass
 
     async def try_fill(self):
-        logger.info("Try Fill started")
+        logger.info("try_fill started, attempting to acquire task_lock...")
         start = time.time()
         ran = False
         try:
             async with self.task_lock:
+                logger.info("try_fill acquired task_lock")
                 dlob = get_dlob(self)
 
                 prune_throttled_nodes(self)
@@ -159,8 +159,8 @@ class PerpFiller(PerpFillerConfig):
                 fillable_nodes = []
                 triggerable_nodes = []
                 for market in self.drift_client.get_perp_market_accounts():
-                    # filter out all markets that aren't actively trading
-                    if not is_variant(market.status, "Active"):
+                    # filter out all markets that we can't really fill on
+                    if is_one_of_variant(market.status, ["Initialized", "FillPaused"]):
                         continue
                     try:
                         nodes_to_fill, nodes_to_trigger = get_perp_nodes_for_market(
@@ -207,29 +207,46 @@ class PerpFiller(PerpFillerConfig):
                     self.watchdog_last_pat = time.time()
 
     async def settle_pnls(self):
-        logger.info("Settle PnLs started")
+        logger.info("settle_pnls started, attempting to acquire task_lock...")
+        now = time.time()
+
+        if now < self.last_settle_pnl + (SETTLE_POSITIVE_PNL_COOLDOWN_MS // 1_000):
+            logger.info("Tried to settle positive PnL, but still cooling down...")
+            return
+
         user = self.drift_client.get_user()
         market_indexes = [pos.market_index for pos in user.get_active_perp_positions()]
-        now = time.time()
-        if len(market_indexes) == MAX_POSITIONS_PER_USER:
-            if now < self.last_settle_pnl + (SETTLE_POSITIVE_PNL_COOLDOWN_MS // 1_000):
-                logger.info("Tried to settle positive PnL, but still cooling down...")
-            else:
-                settle_tasks = []
-                for i in range(0, len(market_indexes), SETTLE_PNL_CHUNKS):
-                    chunk = market_indexes[i : i + SETTLE_PNL_CHUNKS]
+
+        if len(market_indexes) < MAX_POSITIONS_PER_USER:
+            logger.warning(
+                f"active positions less than max (actual: {len(market_indexes)}, max: {MAX_POSITIONS_PER_USER})"
+            )
+            return
+
+        async with self.task_lock:
+            logger.info("settle_pnl acquired task_lock ")
+            attempt = 0
+            while attempt < 3:
+                user = self.drift_client.get_user()
+                market_indexes = [
+                    pos.market_index for pos in user.get_active_perp_positions()
+                ]
+
+                if len(market_indexes) <= 1:
+                    break
+
+                chunk_size = len(market_indexes) // 2
+
+                # settle_tasks = []
+                for i in range(0, len(market_indexes), chunk_size):
+                    chunk = market_indexes[i : i + chunk_size]
+                    logger.critical(f"settle pnl: {attempt} processing chunk: {chunk}")
                     try:
                         ixs = [set_compute_unit_limit(MAX_CU_PER_TX)]
-
                         users = {
                             user.user_public_key: self.drift_client.get_user_account()
                         }
-
-                        settle_ixs = self.drift_client.get_settle_pnl_ixs(
-                            users,
-                            chunk,
-                        )
-
+                        settle_ixs = self.drift_client.get_settle_pnl_ixs(users, chunk)
                         ixs += settle_ixs
 
                         sim_result = await simulate_and_get_tx_with_cus(
@@ -242,6 +259,7 @@ class PerpFiller(PerpFillerConfig):
                             True,
                             self.simulate_tx_for_cu_estimate,
                         )
+
                         logger.info(
                             f"settle_pnls estimate CUs: {sim_result.cu_estimate}"
                         )
@@ -250,38 +268,32 @@ class PerpFiller(PerpFillerConfig):
                                 f"settle_pnls sim error: {sim_result.sim_error}"
                             )
                         else:
-                            settle_tasks.append(
-                                asyncio.create_task(
-                                    self.drift_client.tx_sender.send(sim_result.tx)
-                                )
-                            )
+                            sig = await self.drift_client.tx_sender.send(sim_result.tx)
+                            await asyncio.sleep(0)  # breathe
+                            logger.success(f"settled pnl, tx sig: {sig.tx_sig}")
+
+                            # settle_tasks.append(
+                            #     asyncio.create_task(
+                            #         self.drift_client.tx_sender.send(sim_result.tx)
+                            #     )
+                            # )
                     except Exception as e:
                         logger.error(
                             f"error occurred settling pnl for markets {chunk}: {e}"
                         )
-                        pass
 
-                    try:
-                        results = await asyncio.gather(*settle_tasks)
-                        for result in results:
-                            logger.success(f"settled pnl, tx sig: {result.tx_sig}")
-                    except Exception as e:
-                        logger.error(f"error settling positive pnls: {e}")
-                        # TODO
-                        pass
-        else:
-            logger.warning(
-                f"active positions less than max (actual: {len(market_indexes)}, max: {MAX_POSITIONS_PER_USER})"
-            )
-        self.last_settle_pnl = now
-        duration = time.time() - now
-        logger.success(f"settle_pnls done, took {duration}s")
+                    # try:
+                    #     results = await asyncio.gather(*settle_tasks)
+                    #     for result in results:
+                    #         logger.success(f"settled pnl, tx sig: {result.tx_sig}")
+                    # except Exception as e:
+                    #     logger.error(f"error settling positive pnls: {e}")
 
-    async def log_throttled(self):
-        logger.info("THROTTLED STATS:")
-        logger.info(f"{len(self.throttled_nodes)} nodes throttled")
-        for key, val in self.throttled_nodes.items():
-            logger.info(f"throttled node: {key} -> {val}")
+                attempt += 1
+
+            self.last_settle_pnl = now
+            duration = time.time() - now
+            logger.success(f"settle_pnls done, took {duration}s")
 
 
 async def main():
@@ -309,8 +321,6 @@ async def main():
 
     perp_filler_config = PerpFillerConfig(
         "perp filler",
-        simulate_tx_for_cu_estimate=False,
-        use_burst_cu_limit=False,
         revert_on_failure=True,
     )
 

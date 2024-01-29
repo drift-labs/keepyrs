@@ -1,5 +1,4 @@
 import time
-import logging
 
 from typing import Optional, Tuple
 from dataclasses import dataclass
@@ -234,12 +233,12 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
         # logger.warning(f" . is perp: {is_perp_market_type}")
         # logger.warning(f" . is not fillable by vamm: {is_not_fillable}")
 
-        base_fulfilled = calculate_base_asset_amount_for_amm_to_fulfill(
-            node.node.order,  # type: ignore
-            perp_market_account,  # type: ignore
-            oracle_price_data,  # type: ignore
-            get_latest_slot(perp_filler),
-        )
+        # base_fulfilled = calculate_base_asset_amount_for_amm_to_fulfill(
+        #     node.node.order,  # type: ignore
+        #     perp_market_account,  # type: ignore
+        #     oracle_price_data,  # type: ignore
+        #     get_latest_slot(perp_filler),
+        # )
         # logger.warning(
         #     f" . calculate_base_asset_amount_for_amm_to_fulfill: {base_fulfilled}"
         # )

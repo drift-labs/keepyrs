@@ -1,4 +1,3 @@
-import logging
 import math
 import time
 
@@ -438,6 +437,6 @@ async def send_fill_tx_and_parse_logs(
         logger.success(f"took: {time.time() - start}s")
     except Exception as e:
         if "RevertFill" in str(e):
-            logger.info(f"Fill reverted (fill tx id: {fill_tx_id})")
+            logger.error(f"Fill reverted (fill tx id: {fill_tx_id})")
         else:
             logger.critical(f"Failed to send fill transaction: {e}")

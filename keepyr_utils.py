@@ -1,11 +1,9 @@
 import math
 import time
-import logging
 
 from typing import Optional, Union
 from dataclasses import dataclass
 
-from solana.rpc.types import TxOpts
 from solana.rpc.core import _COMMITMENT_TO_SOLDERS
 
 from solders.transaction import VersionedTransaction  # type: ignore
@@ -27,21 +25,14 @@ from driftpy.dlob.dlob_node import DLOBNode
 from driftpy.dlob.node_list import get_order_signature
 from driftpy.types import OraclePriceData, MarketType
 
-from custom_log import ColoredFormatter
+from custom_log import get_custom_logger
 
 COMPUTE_BUDGET_PROGRAM = Pubkey.from_string(
     "ComputeBudget111111111111111111111111111111"
 )
 
-# logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-
-ch.setFormatter(ColoredFormatter())
-
-logger.addHandler(ch)
+logger = get_custom_logger(__name__)
 
 
 @dataclass
