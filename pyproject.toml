@@ -2,7 +2,7 @@
 name = "keepyrs"
 version = "0.1.0"
 description = ""
-authors = ["soundsonacid <soundsonacid@gmail.com>"]
+authors = ["frank <frank@lunoho.company>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
