@@ -5,19 +5,18 @@ import logging
 import time
 
 from datetime import datetime
-from typing import Union
 from dotenv import load_dotenv
 from aiohttp import web
 
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Commitment
 from solana.rpc.types import TxOpts
-from solders.pubkey import Pubkey
+from solders.pubkey import Pubkey  # type: ignore
 
 from anchorpy import Wallet
 
 from driftpy.slot.slot_subscriber import SlotSubscriber
-from driftpy.drift_client import DriftClient, DEFAULT_TX_OPTIONS
+from driftpy.drift_client import DriftClient
 from driftpy.account_subscription_config import AccountSubscriptionConfig
 from driftpy.auction_subscriber.auction_subscriber import AuctionSubscriber
 from driftpy.auction_subscriber.types import AuctionSubscriberConfig
@@ -26,13 +25,11 @@ from driftpy.user_map.user_map_config import UserMapConfig, WebsocketConfig
 from driftpy.dlob.dlob_subscriber import DLOBSubscriber
 from driftpy.dlob.client_types import DLOBClientConfig
 from driftpy.types import is_variant, MarketType, TxParams
-from driftpy.constants.config import DriftEnv
 from driftpy.constants.numeric_constants import BASE_PRECISION
 from driftpy.keypair import load_keypair
 from driftpy.tx.fast_tx_sender import FastTxSender  # type: ignore
 
 from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
-from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
 from jit_proxy.jitter.base_jitter import JitParams  # type: ignore
 from jit_proxy.jit_proxy_client import JitProxyClient, PriceType  # type: ignore
 
@@ -52,12 +49,8 @@ class JitMaker(Bot):
     def __init__(
         self,
         config: JitMakerConfig,
-        drift_client: DriftClient,
-        usermap: UserMap,
-        jitter: Union[JitterSniper, JitterShotgun],
-        drift_env: DriftEnv,
     ):
-        self.drift_env = drift_env
+        self.drift_env = config.drift_env
 
         # Default values for some attributes
         self.lookup_tables = None
@@ -78,9 +71,9 @@ class JitMaker(Bot):
         self.spread = config.spread
 
         # Set up clients & subscriptions
-        self.drift_client = drift_client
-        self.usermap = usermap
-        self.jitter = jitter
+        self.drift_client = config.drift_client
+        self.usermap = config.usermap
+        self.jitter = config.jitter
 
         self.slot_subscriber = SlotSubscriber(self.drift_client)
 
@@ -495,14 +488,21 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
+    jit_maker_perp_config = JitMakerConfig(
+        "jit maker",
+        [0],
+        [0],
+        MarketType.Perp(),
+        drift_client,
+        usermap,
+        jitter,
+        "mainnet",
+    )
 
     for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
 
-    jit_maker = JitMaker(
-        jit_maker_perp_config, drift_client, usermap, jitter, "mainnet"
-    )
+    jit_maker = JitMaker(jit_maker_perp_config)
 
     # This is an example of a spot JIT maker that will JIT the SOL market
     # jit_maker_spot_config = JitMakerConfig(

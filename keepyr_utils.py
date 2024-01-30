@@ -1,6 +1,7 @@
 import math
 
 from typing import Optional
+from aiohttp import web
 
 from driftpy.dlob.dlob import DLOB
 from driftpy.dlob.dlob_node import DLOBNode
@@ -84,3 +85,33 @@ def round_down_to_nearest(num: int, nearest: int = 100) -> int:
 def decode_name(bytes_list: list[int]) -> str:
     byte_array = bytes(bytes_list)
     return byte_array.decode("utf-8").strip()
+
+
+def str_to_market_type(string: str) -> MarketType:
+    if string.lower() == "perp":
+        return MarketType.Perp()
+    elif string.lower() == "spot":
+        return MarketType.Spot()
+    else:
+        raise ValueError(f"expected perp or spot, got {string}")
+
+
+def make_health_check_handler(bot):
+    async def health_check_handler(request):
+        healthy = await bot.health_check()
+        if healthy:
+            return web.Response(status=200)  # OK status for healthy
+        else:
+            return web.Response(status=503)  # Service Unavailable for unhealthy
+
+    return health_check_handler
+
+
+async def start_server(bot):
+    app = web.Application()
+    health_handler = make_health_check_handler(bot)
+    app.router.add_get(f"/health/{bot.name}", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()

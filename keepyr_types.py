@@ -1,7 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Union
 from dataclasses import dataclass
+
 from driftpy.types import MarketType
+from driftpy.drift_client import DriftClient
+from driftpy.user_map.user_map import UserMap
+from driftpy.constants.config import DriftEnv
+
+from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
+from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
 
 
 class Bot(ABC):
@@ -32,5 +39,9 @@ class JitMakerConfig(BotConfig):
     market_indexes: list[int]
     sub_accounts: list[int]
     market_type: MarketType
+    drift_client: DriftClient
+    usermap: UserMap
+    jitter: Union[JitterSniper, JitterShotgun]
+    drift_env: DriftEnv
     target_leverage: float = 1.0
     spread: float = 0.0
