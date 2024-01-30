@@ -10,7 +10,7 @@ python = "3.10.13"
 anchorpy = "0.17.1"
 solana = "0.30.1"
 python-dotenv = "^1.0.0"
-jit-proxy = { git = "https://github.com/drift-labs/jit-proxy.git", branch = "master", subdirectory = "python"}
+drift-jit-proxy = { git = "https://github.com/drift-labs/jit-proxy.git", branch = "master", subdirectory = "python"}
 driftpy = {path = "/Users/frankfinnegan/Documents/musings/drift/driftpy", develop = true}
 
 [build-system]

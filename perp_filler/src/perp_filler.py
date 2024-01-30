@@ -180,17 +180,11 @@ class PerpFiller(PerpFillerConfig):
                 (
                     filtered_fillable_nodes,
                     filtered_triggerable_nodes,
-                ) = filter_perp_nodes_for_market(
-                    self, fillable_nodes, triggerable_nodes
-                )
+                ) = filter_perp_nodes(self, fillable_nodes, triggerable_nodes)
 
                 await asyncio.gather(
-                    execute_fillable_perp_nodes_for_market(
-                        self, filtered_fillable_nodes
-                    ),
-                    execute_triggerable_perp_nodes_for_market(
-                        self, filtered_triggerable_nodes
-                    ),
+                    execute_fillable_perp_nodes(self, filtered_fillable_nodes),
+                    execute_triggerable_perp_nodes(self, filtered_triggerable_nodes),
                 )
 
                 logger.success(f"done: {time.time() - start}s")
@@ -211,11 +205,18 @@ class PerpFiller(PerpFillerConfig):
         now = time.time()
 
         if now < self.last_settle_pnl + (SETTLE_POSITIVE_PNL_COOLDOWN_MS // 1_000):
-            logger.info("Tried to settle positive PnL, but still cooling down...")
+            logger.info("tried to settle positive pnl, but still cooling down...")
             return
 
         user = self.drift_client.get_user()
         market_indexes = [pos.market_index for pos in user.get_active_perp_positions()]
+
+        # If we try to settle pnl on a market with a different status than active it'll fail our ix
+        # So we filter them out
+        for market in market_indexes:
+            perp_market = self.drift_client.get_perp_market_account(market)
+            if not is_variant(perp_market.status, "Active"):
+                market_indexes.remove(perp_market.market_index)
 
         if len(market_indexes) < MAX_POSITIONS_PER_USER:
             logger.warning(
@@ -237,7 +238,6 @@ class PerpFiller(PerpFillerConfig):
 
                 chunk_size = len(market_indexes) // 2
 
-                # settle_tasks = []
                 for i in range(0, len(market_indexes), chunk_size):
                     chunk = market_indexes[i : i + chunk_size]
                     logger.critical(f"settle pnl: {attempt} processing chunk: {chunk}")
@@ -272,22 +272,10 @@ class PerpFiller(PerpFillerConfig):
                             await asyncio.sleep(0)  # breathe
                             logger.success(f"settled pnl, tx sig: {sig.tx_sig}")
 
-                            # settle_tasks.append(
-                            #     asyncio.create_task(
-                            #         self.drift_client.tx_sender.send(sim_result.tx)
-                            #     )
-                            # )
                     except Exception as e:
                         logger.error(
                             f"error occurred settling pnl for markets {chunk}: {e}"
                         )
-
-                    # try:
-                    #     results = await asyncio.gather(*settle_tasks)
-                    #     for result in results:
-                    #         logger.success(f"settled pnl, tx sig: {result.tx_sig}")
-                    # except Exception as e:
-                    #     logger.error(f"error settling positive pnls: {e}")
 
                 attempt += 1
 

@@ -124,7 +124,7 @@ def get_perp_nodes_for_market(
     return (nodes_to_fill, nodes_to_trigger)
 
 
-def filter_perp_nodes_for_market(
+def filter_perp_nodes(
     perp_filler,
     fillable: list[NodeToFill],
     triggerable: list[NodeToTrigger],

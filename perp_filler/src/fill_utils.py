@@ -35,7 +35,7 @@ from custom_log import get_custom_logger
 logger = get_custom_logger(__name__)
 
 
-async def execute_fillable_perp_nodes_for_market(perp_filler, nodes: list[NodeToFill]):
+async def execute_fillable_perp_nodes(perp_filler, nodes: list[NodeToFill]):
     logger.info(f"filling {len(nodes)} nodes")
     filled_node_count = 0
     while filled_node_count < len(nodes):
@@ -45,9 +45,7 @@ async def execute_fillable_perp_nodes_for_market(perp_filler, nodes: list[NodeTo
         filled_node_count += attempted_fills
 
 
-async def execute_triggerable_perp_nodes_for_market(
-    perp_filler, nodes: list[NodeToTrigger]
-):
+async def execute_triggerable_perp_nodes(perp_filler, nodes: list[NodeToTrigger]):
     logger.info(f"triggering {len(nodes)} nodes")
     for node in nodes:
         node.node.have_trigger = True
@@ -171,6 +169,12 @@ async def try_bulk_fill_perp_nodes(perp_filler, nodes: list[NodeToFill]):
             await try_fill_multi_maker_perp_nodes(perp_filler, node)
             nodes_sent.append(node)
             continue
+        else:
+            # We can't fill nodes against vAMM if the AMM is paused
+            perp_market = perp_filler.drift_client.get_perp_market_account(node.node.order.market_index)  # type: ignore
+            if is_variant(perp_market.status, "AmmPaused"):
+                logger.error(f"Cannot fill node against vAMM on market: {node.node.order.market_index}, market status: {perp_market.status}")  # type: ignore
+                continue
         logger.info(
             log_message_for_node_to_fill(
                 node, f"Filling perp node {idx} (fill tx id: {fill_tx_id}) order slot: {node.node.order.slot}"  # type: ignore
