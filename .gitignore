@@ -4,3 +4,5 @@ __pycache__/
 *.py[cod]
 .mypy_cache/
 .idea
+.python-version
+jit-maker-config.yaml

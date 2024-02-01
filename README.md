@@ -11,3 +11,12 @@
 `poetry run python -m jit_maker.src.jit_maker`
 
 You CANNOT make multiple markets with the same sub account on the JIT Maker.  This code does not account for overleveraging as a result of having positions open across several markets on the same sub account id. 
+
+To adjust your account's target leverage, change the TARGET_LEVERAGE_PER_ACCOUNT constant at `jit_maker.py:47`.  The JIT maker will open positions up to this leverage, and once reached, will only open positions that reduce the account's leverage (i.e. if you are max levered long, it'll only open shorts until you're no longer max levered long)
+
+
+## PERP FILLER
+
+`poetry run python -m perp_filler.src.perp_filler`
+
+WIP

@@ -8,14 +8,17 @@ from datetime import datetime
 from typing import Union
 from dotenv import load_dotenv
 from aiohttp import web
+from driftpy.math.amm import calculate_bid_ask_price
 
 from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Processed
+from solana.rpc.types import TxOpts
 from solders.pubkey import Pubkey
 
 from anchorpy import Wallet
 
 from driftpy.slot.slot_subscriber import SlotSubscriber
-from driftpy.drift_client import DriftClient
+from driftpy.drift_client import DriftClient, DEFAULT_TX_OPTIONS
 from driftpy.account_subscription_config import AccountSubscriptionConfig
 from driftpy.auction_subscriber.auction_subscriber import AuctionSubscriber
 from driftpy.auction_subscriber.types import AuctionSubscriberConfig
@@ -27,6 +30,7 @@ from driftpy.types import is_variant, MarketType, TxParams
 from driftpy.constants.config import DriftEnv
 from driftpy.constants.numeric_constants import BASE_PRECISION
 from driftpy.keypair import load_keypair
+from driftpy.tx.fast_tx_sender import FastTxSender  # type: ignore
 
 from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
 from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
@@ -43,8 +47,6 @@ from jit_maker.src.utils import calculate_base_amount_to_mm_perp, calculate_base
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-TARGET_LEVERAGE_PER_ACCOUNT = 1
 
 
 class JitMaker(Bot):
@@ -73,6 +75,8 @@ class JitMaker(Bot):
         self.sub_accounts: list[int] = config.sub_accounts  # type: ignore
         self.market_indexes: list[int] = config.market_indexes  # type: ignore
         self.market_type = config.market_type
+        self.target_leverage = config.target_leverage
+        self.spread = config.spread
 
         # Set up clients & subscriptions
         self.drift_client = drift_client
@@ -190,7 +194,7 @@ class JitMaker(Bot):
             [num for num in self.sub_accounts if num == sub_id]
         )
 
-        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        target_leverage = self.target_leverage / num_markets_for_subaccount
         actual_leverage = drift_user.get_leverage() / 10_000
 
         max_base = calculate_base_amount_to_mm_perp(
@@ -239,6 +243,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=False,
         )
 
         best_ask = get_best_limit_ask_exclusionary(
@@ -248,19 +253,35 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=False,
         )
 
-        if not best_bid or not best_ask:
-            logger.warning("skipping, no best bid / ask")
-            return
+        (amm_bid, amm_ask) = calculate_bid_ask_price(perp_market_account.amm, oracle_price_data, True)
 
-        best_bid_price = best_bid.get_price(
-            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
-        )
+        if best_bid is not None:
+            best_dlob_price = best_bid.get_price(
+                oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+            )
 
-        best_ask_price = best_ask.get_price(
-            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
-        )
+            if best_dlob_price > amm_ask:
+                best_bid_price = amm_ask
+            else:
+                best_bid_price = max(amm_bid, best_dlob_price)
+
+        else:
+            best_bid_price = amm_bid
+
+        if best_ask is not None:
+            best_dlob_price = best_ask.get_price(
+                oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+            )
+
+            if best_dlob_price < amm_bid:
+                best_ask_price = amm_bid
+            else:
+                best_ask_price = min(amm_ask, best_dlob_price)
+        else:
+            best_ask_price = amm_ask
 
         logger.info(f"best bid price: {best_bid_price}")
         logger.info(f"best ask price: {best_ask_price}")
@@ -268,10 +289,10 @@ class JitMaker(Bot):
         logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
 
         bid_offset = math.floor(
-            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+            best_bid_price - ((1 + self.spread) * oracle_price_data.price)  # type: ignore
         )
         ask_offset = math.floor(
-            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+            best_ask_price - ((1 - self.spread) * oracle_price_data.price)  # type: ignore
         )
 
         logger.info(f"max_base: {max_base}")
@@ -313,7 +334,7 @@ class JitMaker(Bot):
             [num for num in self.sub_accounts if num == sub_id]
         )
 
-        target_leverage = TARGET_LEVERAGE_PER_ACCOUNT / num_markets_for_subaccount
+        target_leverage = self.target_leverage / num_markets_for_subaccount
         actual_leverage = drift_user.get_leverage() / 10_000
 
         max_base = calculate_base_amount_to_mm_spot(
@@ -362,6 +383,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         best_ask = get_best_limit_ask_exclusionary(
@@ -371,6 +393,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
+            uncross=True,
         )
 
         if not best_bid or not best_ask:
@@ -391,10 +414,10 @@ class JitMaker(Bot):
         logger.info(f"oracle price: {oracle_price_data.price}")  # type: ignore
 
         bid_offset = math.floor(
-            best_bid_price - (0.99 * oracle_price_data.price)  # type: ignore
+            best_bid_price - ((1 + self.spread) * oracle_price_data.price)  # type: ignore
         )
         ask_offset = math.floor(
-            best_ask_price - (1.01 * oracle_price_data.price)  # type: ignore
+            best_ask_price - ((1 - self.spread) * oracle_price_data.price)  # type: ignore
         )
 
         logger.info(f"max_base: {max_base}")
@@ -455,12 +478,20 @@ async def main():
 
     connection = AsyncClient(url)
 
+    commitment = Processed
+    tx_opts = TxOpts(skip_confirmation=False, preflight_commitment=commitment)
+    fast_tx_sender = FastTxSender(connection, tx_opts, 3)
+
     drift_client = DriftClient(
         connection,
         wallet,
         "mainnet",
-        account_subscription=AccountSubscriptionConfig("websocket"),
-        tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
+        account_subscription=AccountSubscriptionConfig(
+            "websocket", commitment=commitment
+        ),
+        tx_params=TxParams(700_000, 50_000),  # crank priority fees way up
+        opts=tx_opts,
+        tx_sender=fast_tx_sender,
     )
 
     usermap_config = UserMapConfig(drift_client, WebsocketConfig())
@@ -468,17 +499,19 @@ async def main():
 
     await usermap.subscribe()
 
-    auction_subscriber = AuctionSubscriber(AuctionSubscriberConfig(drift_client))
+    auction_subscriber = AuctionSubscriber(
+        AuctionSubscriberConfig(drift_client, commitment)
+    )
 
     jit_proxy_client = JitProxyClient(
         drift_client,
         Pubkey.from_string("J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP"),
     )
 
-    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, False)
+    jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp())
+    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp(), spread=-.001)
 
     for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)
