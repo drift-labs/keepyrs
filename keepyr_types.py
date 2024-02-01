@@ -6,10 +6,12 @@ from driftpy.types import MarketType
 from driftpy.drift_client import DriftClient
 from driftpy.user_map.user_map import UserMap
 from driftpy.constants.config import DriftEnv
+from driftpy.accounts.bulk_account_loader import BulkAccountLoader
+from driftpy.dlob.dlob_node import DLOBNode
+from driftpy.events.event_subscriber import EventSubscriber
 
 from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
 from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
-from driftpy.dlob.dlob_node import DLOBNode
 
 MakerNodeMap = dict[str, list[DLOBNode]]
 
@@ -52,7 +54,11 @@ class JitMakerConfig(BotConfig):
 
 @dataclass
 class PerpFillerConfig(BotConfig):
+    drift_client: DriftClient
+    user_map: UserMap
     filler_polling_interval: Optional[float] = None
     revert_on_failure: bool = False
     simulate_tx_for_cu_estimate: bool = False
     use_burst_cu_limit: bool = False
+    bulk_account_loader: Optional[BulkAccountLoader] = None
+    event_subscriber: Optional[EventSubscriber] = None
