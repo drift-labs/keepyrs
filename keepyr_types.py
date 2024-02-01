@@ -60,5 +60,3 @@ class PerpFillerConfig(BotConfig):
     revert_on_failure: bool = False
     simulate_tx_for_cu_estimate: bool = False
     use_burst_cu_limit: bool = False
-    bulk_account_loader: Optional[BulkAccountLoader] = None
-    event_subscriber: Optional[EventSubscriber] = None

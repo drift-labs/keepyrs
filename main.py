@@ -26,10 +26,11 @@ from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
 from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
 from jit_proxy.jit_proxy_client import JitProxyClient  # type: ignore
 
-from keepyr_types import JitMakerConfig
+from keepyr_types import JitMakerConfig, PerpFillerConfig
 from keepyr_utils import str_to_market_type, start_server
 
 from jit_maker.src.jit_maker import JitMaker
+from perp_filler.src.perp_filler import PerpFiller
 
 JIT_PROGRAM_ID = Pubkey.from_string("J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP")
 
@@ -42,7 +43,7 @@ def load_config(file_path):
 async def run_forever(bot):
     print(bot.name)
     await bot.init()
-    await bot.start_interval_loop(10_000)
+    await bot.start_interval_loop()
     asyncio.create_task(start_server(bot))
     try:
         while True:
@@ -140,6 +141,25 @@ async def main():
             jit_maker = JitMaker(jit_maker_config)
 
             bots.append(jit_maker)
+        elif bot == "perp_filler":
+            if not bot_config["filler_polling_interval"]:
+                filler_polling_interval = None
+            else:
+                filler_polling_interval = bot_config["filler_polling_interval"]
+
+            perp_filler_config = PerpFillerConfig(
+                bot_config["bot_id"],
+                drift_client,
+                usermap,
+                filler_polling_interval,
+                bot_config["revert_on_failure"],
+                bot_config["simulate_tx_for_cu_estimate"],
+                bot_config["use_burst_cu_limit"],
+            )
+
+            perp_filler = PerpFiller(perp_filler_config)
+
+            bots.append(perp_filler)
         # load other bots from configs
 
     tasks = [run_forever(bot) for bot in bots]

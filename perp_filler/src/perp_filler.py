@@ -63,8 +63,6 @@ class PerpFiller(PerpFillerConfig):
 
         self.drift_client = config.drift_client
         self.slot_subscriber = SlotSubscriber(self.drift_client)
-        self.event_subscriber = config.event_subscriber
-        self.bulk_account_loader = config.bulk_account_loader
         self.user_map = config.user_map
 
         dlob_config = DLOBClientConfig(
@@ -94,8 +92,6 @@ class PerpFiller(PerpFillerConfig):
         await self.slot_subscriber.subscribe()
         await self.dlob_subscriber.subscribe()
         await self.priority_fee_subscriber.subscribe()
-        if self.event_subscriber:
-            await self.event_subscriber.subscribe()
 
         self.lookup_tables = [await self.drift_client.fetch_market_lookup_table()]
 
