@@ -7,9 +7,10 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 from aiohttp import web
+from driftpy.math.amm import calculate_bid_ask_price
 
 from solana.rpc.async_api import AsyncClient
-from solana.rpc.commitment import Commitment
+from solana.rpc.commitment import Processed
 from solana.rpc.types import TxOpts
 from solders.pubkey import Pubkey  # type: ignore
 
@@ -235,7 +236,7 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
-            uncross=True,
+            uncross=False,
         )
 
         best_ask = get_best_limit_ask_exclusionary(
@@ -245,20 +246,37 @@ class JitMaker(Bot):
             oracle_price_data.slot,  # type: ignore
             oracle_price_data,  # type: ignore
             str(drift_user.user_public_key),
-            uncross=True,
+            uncross=False,
         )
 
-        if not best_bid or not best_ask:
-            logger.warning("skipping, no best bid / ask")
-            return
-
-        best_bid_price = best_bid.get_price(
-            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+        (amm_bid, amm_ask) = calculate_bid_ask_price(
+            perp_market_account.amm, oracle_price_data, True
         )
 
-        best_ask_price = best_ask.get_price(
-            oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
-        )
+        if best_bid is not None:
+            best_dlob_price = best_bid.get_price(
+                oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+            )
+
+            if best_dlob_price > amm_ask:
+                best_bid_price = amm_ask
+            else:
+                best_bid_price = max(amm_bid, best_dlob_price)
+
+        else:
+            best_bid_price = amm_bid
+
+        if best_ask is not None:
+            best_dlob_price = best_ask.get_price(
+                oracle_price_data, self.dlob_subscriber.slot_source.get_slot()  # type: ignore
+            )
+
+            if best_dlob_price < amm_bid:
+                best_ask_price = amm_bid
+            else:
+                best_ask_price = min(amm_ask, best_dlob_price)
+        else:
+            best_ask_price = amm_ask
 
         logger.info(f"best bid price: {best_bid_price}")
         logger.info(f"best ask price: {best_ask_price}")
@@ -282,8 +300,8 @@ class JitMaker(Bot):
             perp_min_position = 0
 
         new_perp_params = JitParams(
-            bid=min(bid_offset, 0),
-            ask=max(ask_offset, 0),
+            bid=bid_offset,
+            ask=ask_offset,
             min_position=perp_min_position,
             max_position=perp_max_position,
             price_type=PriceType.Oracle(),
@@ -455,7 +473,7 @@ async def main():
 
     connection = AsyncClient(url)
 
-    commitment = Commitment("processed")
+    commitment = Processed
     tx_opts = TxOpts(skip_confirmation=False, preflight_commitment=commitment)
     fast_tx_sender = FastTxSender(connection, tx_opts, 3)
 
@@ -466,7 +484,7 @@ async def main():
         account_subscription=AccountSubscriptionConfig(
             "websocket", commitment=commitment
         ),
-        tx_params=TxParams(600_000, 5_000),  # crank priority fees way up
+        tx_params=TxParams(700_000, 50_000),  # crank priority fees way up
         opts=tx_opts,
         tx_sender=fast_tx_sender,
     )

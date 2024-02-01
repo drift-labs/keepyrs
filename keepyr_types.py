@@ -9,6 +9,9 @@ from driftpy.constants.config import DriftEnv
 
 from jit_proxy.jitter.jitter_shotgun import JitterShotgun  # type: ignore
 from jit_proxy.jitter.jitter_sniper import JitterSniper  # type: ignore
+from driftpy.dlob.dlob_node import DLOBNode
+
+MakerNodeMap = dict[str, list[DLOBNode]]
 
 
 class Bot(ABC):
@@ -45,3 +48,11 @@ class JitMakerConfig(BotConfig):
     drift_env: DriftEnv
     target_leverage: float = 1.0
     spread: float = 0.0
+
+
+@dataclass
+class PerpFillerConfig(BotConfig):
+    filler_polling_interval: Optional[float] = None
+    revert_on_failure: bool = False
+    simulate_tx_for_cu_estimate: bool = False
+    use_burst_cu_limit: bool = False
