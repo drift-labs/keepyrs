@@ -187,20 +187,16 @@ async def simulate_and_get_tx_with_cus(
     do_sim: bool = True,
 ):
     str_err: Optional[str] = None
-
     if len(ixs) == 0:
         raise ValueError("cannot simulate empty tx")
-
     set_cu_limit_ix_idx = -1
     for idx, ix in enumerate(ixs):
         if is_set_compute_units_ix(ix):
             set_cu_limit_ix_idx = idx
             break
-
     tx = await tx_sender.get_versioned_tx(
         ixs, drift_client.wallet.payer, lookup_tables, additional_signers  # type: ignore
     )
-
     if not do_sim:
         return SimulateAndGetTxWithCUsResponse(-1, tx)
 

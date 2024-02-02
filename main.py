@@ -41,7 +41,6 @@ def load_config(file_path):
 
 
 async def run_forever(bot):
-    print(bot.name)
     await bot.init()
     await bot.start_interval_loop()
     asyncio.create_task(start_server(bot))

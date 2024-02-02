@@ -214,6 +214,8 @@ class PerpFiller(PerpFillerConfig):
             logger.warning(
                 f"active positions less than max (actual: {len(market_indexes)}, max: {MAX_POSITIONS_PER_USER})"
             )
+            duration = time.time() - now
+            logger.success(f"settle_pnls done, took {duration}s")
             return
 
         async with self.task_lock:
@@ -272,8 +274,8 @@ class PerpFiller(PerpFillerConfig):
                 attempt += 1
 
             self.last_settle_pnl = now
-            duration = time.time() - now
-            logger.success(f"settle_pnls done, took {duration}s")
+        duration = time.time() - now
+        logger.success(f"settle_pnls done, took {duration}s")
 
 
 async def main():
