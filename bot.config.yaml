@@ -1,0 +1,18 @@
+private_key: "PRIVATE KEY" # as a list of ints
+rpc_url: "RPC"
+drift_env: "mainnet"
+
+bots: 
+  - "jit_maker"
+
+bot_configs:
+  - bot_id: "jit maker"
+    market_indexes:
+      - 0
+    sub_accounts:
+      - 0
+    market_type: "Perp" # or "Spot"
+    jitter_type: "Shotgun" # or "Sniper"
+    verbose: False
+    target_leverage: 1.0
+    spread: 0.0

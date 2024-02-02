@@ -43,10 +43,6 @@ class PerpFiller(PerpFillerConfig):
     def __init__(
         self,
         config: PerpFillerConfig,
-        drift_client: DriftClient,
-        user_map: UserMap,
-        bulk_account_loader: Optional[BulkAccountLoader] = None,
-        event_subscriber: Optional[EventSubscriber] = None,
     ):
         self.lookup_tables = None
         self.tasks: list[asyncio.Task] = []
@@ -65,11 +61,9 @@ class PerpFiller(PerpFillerConfig):
         self.polling_interval = config.filler_polling_interval or DEFAULT_INTERVAL_S
         self.use_burst_cu_limit = config.use_burst_cu_limit
 
-        self.drift_client = drift_client
+        self.drift_client = config.drift_client
         self.slot_subscriber = SlotSubscriber(self.drift_client)
-        self.event_subscriber = event_subscriber
-        self.bulk_account_loader = bulk_account_loader
-        self.user_map = user_map
+        self.user_map = config.user_map
 
         dlob_config = DLOBClientConfig(
             self.drift_client, self.user_map, self.slot_subscriber, 30
@@ -98,8 +92,6 @@ class PerpFiller(PerpFillerConfig):
         await self.slot_subscriber.subscribe()
         await self.dlob_subscriber.subscribe()
         await self.priority_fee_subscriber.subscribe()
-        if self.event_subscriber:
-            await self.event_subscriber.subscribe()
 
         self.lookup_tables = [await self.drift_client.fetch_market_lookup_table()]
 
@@ -222,6 +214,8 @@ class PerpFiller(PerpFillerConfig):
             logger.warning(
                 f"active positions less than max (actual: {len(market_indexes)}, max: {MAX_POSITIONS_PER_USER})"
             )
+            duration = time.time() - now
+            logger.success(f"settle_pnls done, took {duration}s")
             return
 
         async with self.task_lock:
@@ -280,8 +274,8 @@ class PerpFiller(PerpFillerConfig):
                 attempt += 1
 
             self.last_settle_pnl = now
-            duration = time.time() - now
-            logger.success(f"settle_pnls done, took {duration}s")
+        duration = time.time() - now
+        logger.success(f"settle_pnls done, took {duration}s")
 
 
 async def main():
@@ -309,10 +303,12 @@ async def main():
 
     perp_filler_config = PerpFillerConfig(
         "perp filler",
+        drift_client,
+        usermap,
         revert_on_failure=True,
     )
 
-    perp_filler = PerpFiller(perp_filler_config, drift_client, usermap)
+    perp_filler = PerpFiller(perp_filler_config)
 
     await perp_filler.init()
 

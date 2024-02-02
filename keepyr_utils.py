@@ -1,6 +1,7 @@
 import math
 import time
 
+from aiohttp import web
 from typing import Optional, Union
 from dataclasses import dataclass
 
@@ -122,6 +123,36 @@ def decode_name(bytes_list: list[int]) -> str:
     return byte_array.decode("utf-8").strip()
 
 
+def str_to_market_type(string: str) -> MarketType:
+    if string.lower() == "perp":
+        return MarketType.Perp()
+    elif string.lower() == "spot":
+        return MarketType.Spot()
+    else:
+        raise ValueError(f"expected perp or spot, got {string}")
+
+
+def make_health_check_handler(bot):
+    async def health_check_handler(request):
+        healthy = await bot.health_check()
+        if healthy:
+            return web.Response(status=200)  # OK status for healthy
+        else:
+            return web.Response(status=503)  # Service Unavailable for unhealthy
+
+    return health_check_handler
+
+
+async def start_server(bot):
+    app = web.Application()
+    health_handler = make_health_check_handler(bot)
+    app.router.add_get(f"/health/{bot.name}", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+
+
 def get_node_to_fill_signature(node: NodeToFill) -> str:
     if not node.node.user_account:  # type: ignore
         return "~"
@@ -156,20 +187,16 @@ async def simulate_and_get_tx_with_cus(
     do_sim: bool = True,
 ):
     str_err: Optional[str] = None
-
     if len(ixs) == 0:
         raise ValueError("cannot simulate empty tx")
-
     set_cu_limit_ix_idx = -1
     for idx, ix in enumerate(ixs):
         if is_set_compute_units_ix(ix):
             set_cu_limit_ix_idx = idx
             break
-
     tx = await tx_sender.get_versioned_tx(
         ixs, drift_client.wallet.payer, lookup_tables, additional_signers  # type: ignore
     )
-
     if not do_sim:
         return SimulateAndGetTxWithCUsResponse(-1, tx)
 
