@@ -3,6 +3,8 @@ from typing import Optional
 from dataclasses import dataclass
 from driftpy.types import MarketType
 from driftpy.dlob.dlob_node import DLOBNode
+from driftpy.drift_client import DriftClient
+from driftpy.user_map.user_map import UserMap
 
 MakerNodeMap = dict[str, list[DLOBNode]]
 
@@ -45,3 +47,15 @@ class PerpFillerConfig(BotConfig):
     revert_on_failure: bool = False
     simulate_tx_for_cu_estimate: bool = False
     use_burst_cu_limit: bool = False
+
+
+@dataclass
+class LiquidatorConfig(BotConfig):
+    drift_client: DriftClient
+    usermap: UserMap
+    perp_market_indexes: list[int]
+    spot_market_indexes: list[int]
+    active_sub_account: int
+    all_sub_accounts: list[int]
+    perp_market_to_sub_account: dict[int, int]
+    spot_market_to_sub_account: dict[int, int]
