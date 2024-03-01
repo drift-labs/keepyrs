@@ -291,7 +291,7 @@ async def liquidate_perp_pnl(
                 borrow_market_index_to_liq
             )
 
-            if not sub_account_to_liq_borrow:
+            if sub_account_to_liq_borrow is None:
                 logger.info(
                     f"no sub account to liquidate for market: {borrow_market_index_to_liq}, skipping"
                 )
@@ -343,7 +343,7 @@ async def liquidate_perp_pnl(
             liquidatee_position.market_index
         )
 
-        if not sub_account_to_takeover_perp_pnl:
+        if sub_account_to_takeover_perp_pnl is None:
             logger.info(
                 f"no sub account to liquidate for market: {liquidatee_position.market_index}, skipping"
             )

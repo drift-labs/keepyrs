@@ -152,17 +152,17 @@ class Liquidator(LiquidatorConfig):
             liquidatable_users, key=lambda user: user.margin_requirement, reverse=True
         )
 
-        print(len(liquidatable_users))
-
         for liquidatable_user in liquidatable_users:
-            print(
-                f"total collateral: {liquidatable_user.total_collateral} maintenance requirement: {liquidatable_user.margin_requirement} can be liq: {liquidatable_user.can_be_liquidated}"
-            )
+            if liquidatable_user.total_collateral == 0:
+                continue
 
             if is_user_bankrupt(user) or user.is_bankrupt():
                 await self.try_resolve_bankruptcy(user)
             elif liquidatable_user.can_be_liquidated:
                 logger.info(f"liquidating user: {liquidatable_user.user_key}")
+                logger.info(
+                    f"total collateral: {liquidatable_user.total_collateral} maintenance requirement: {liquidatable_user.margin_requirement}"
+                )
 
                 liquidator_user = self.drift_client.get_user()
                 liquidatee_user_account = liquidatable_user.user.get_user_account()
@@ -253,12 +253,7 @@ class Liquidator(LiquidatorConfig):
                             liquidatee_position.market_index
                         )
 
-                        # if not is_variant(perp_market.status, "Active"):
-                        #     logger.warn(f"perp market {liquidatee_position.market_index} not active: {perp_market.status}")
-                        #     continue
-
                         if perp_market.market_index == 17:
-                            logger.warn("rlb")
                             continue
 
                         if not perp_market:
@@ -318,7 +313,8 @@ class Liquidator(LiquidatorConfig):
                                 f"failed to liquidate perp position for user: {liquidatable_user.user_key}"
                             )
                             logger.error(e)
-                            os._exit(1)
+                            # traceback.print_exc()
+                            # os._exit(1)
                         logger.info(
                             f"finished liquidating perp position in {time.time() - start}s"
                         )
@@ -341,6 +337,7 @@ class Liquidator(LiquidatorConfig):
                                 f"failed to clear lp position for user: {liquidatable_user.user_key}"
                             )
                             logger.error(e)
+                            traceback.print_exc()
                             os._exit(1)
                         logger.info(
                             f"finished clearing lp position in {time.time() - start}s"
@@ -386,7 +383,8 @@ class Liquidator(LiquidatorConfig):
                                     f"failed to clear open orders for user: {liquidatable_user.user_key}"
                                 )
                                 logger.error(e)
-                                os._exit(1)
+                                # traceback.print_exc()
+                                # os._exit(1)
                             logger.info(
                                 f"finished clearing open orders in {time.time() - start}s"
                             )
@@ -427,7 +425,8 @@ class Liquidator(LiquidatorConfig):
                                     f"failed to liquidate spot position for user: {liquidatable_user.user_key}"
                                 )
                                 logger.error(e)
-                                os._exit(1)
+                                # traceback.print_exc()
+                                # os._exit(1)
                             logger.info(
                                 f"finished liquidating spot position in {time.time() - start}s"
                             )
@@ -454,7 +453,8 @@ class Liquidator(LiquidatorConfig):
                         f"failed to clear stuck liquidation for user: {liquidatable_user.user_key}"
                     )
                     logger.error(e)
-                    os._exit(1)
+                    # traceback.print_exc()
+                    # os._exit(1)
                 logger.info(
                     f"finished clearing stuck liquidation in {time.time() - start}s"
                 )
@@ -491,7 +491,8 @@ class Liquidator(LiquidatorConfig):
                     f"failed to resolve perp bankruptcy in market: {market_index} for user: {str(user_key)}"
                 )
                 logger.error(e)
-                os._exit(1)
+                # traceback.print_exc()
+                # os._exit(1)
             logger.info(
                 f"finished resolving for perp market: {market_index} in {start - time.time()}s"
             )
@@ -515,7 +516,8 @@ class Liquidator(LiquidatorConfig):
                     f"failed to resolve spot bankruptcy in market: {market_index} for user: {str(user_key)}"
                 )
                 logger.error(e)
-                os._exit(1)
+                # traceback.print_exc()
+                # os._exit(1)
             logger.info(
                 f"finished resolving for spot market: {market_index} in {start - time.time()}s"
             )
@@ -542,7 +544,7 @@ async def main():
         account_subscription=AccountSubscriptionConfig(
             "websocket", commitment=commitment
         ),
-        tx_params=TxParams(700_000, 100_000),  # crank priority fees way up
+        tx_params=TxParams(700_000, 100_000_000),  # crank priority fees way up
         opts=tx_opts,
         tx_sender=fast_tx_sender,
     )
@@ -552,33 +554,9 @@ async def main():
 
     await usermap.subscribe()
 
-    perps = {
-        0: 0,
-        1: 0,
-        2: 0,
-        3: 0,
-        # 4:0,
-        # 5:0,
-        # 6:0,
-        # 7:0,
-        # 8:0,
-        # 9:0,
-        # 10:0
-    }
+    perps = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0}
 
-    spot = {
-        0: 0,
-        1: 0,
-        2: 0,
-        3: 0,
-        # 4:0,
-        # 5:0,
-        # 6:0,
-        # 7:0,
-        # 8:0,
-        # 9:0,
-        # 10:0
-    }
+    spot = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0}
 
     min_deposit_to_liq = {
         0: 100,
