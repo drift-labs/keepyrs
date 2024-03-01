@@ -22,6 +22,7 @@ class LiquidatableUser:
     user_key: str
     margin_requirement: int
     can_be_liquidated: bool
+    total_collateral: int
 
 
 def calculate_spot_token_amount_to_liquidate(
@@ -116,7 +117,7 @@ def find_best_spot_position(
 
         if abs(position.scaled_balance) < min_amount:
             logger.info(
-                f"find best spot position: skipping market: {position.market_index} due to min_amount: {min_amount}"
+                f"find best spot position: skipping market: {position.market_index}, min_amount: {min_amount} position.scaled_balance: {position.scaled_balance}"
             )
             continue
 

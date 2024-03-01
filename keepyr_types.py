@@ -59,3 +59,4 @@ class LiquidatorConfig(BotConfig):
     all_sub_accounts: list[int]
     perp_market_to_sub_account: dict[int, int]
     spot_market_to_sub_account: dict[int, int]
+    min_deposit_to_liq: Optional[dict[int, int]] = None
