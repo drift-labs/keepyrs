@@ -99,7 +99,7 @@ class Liquidator(LiquidatorConfig):
 
     async def start_interval_loop(self, interval_ms: int = 6_000):
         self.tasks.append(
-            asyncio.create_task(self.spawn(self.try_liquidate, interval_ms / 1_000))
+            asyncio.create_task(self.spawn(self.try_liquidate, interval_ms // 1_000))
         )
         self.tasks.append(
             asyncio.create_task(
@@ -343,7 +343,7 @@ class Liquidator(LiquidatorConfig):
     async def try_resolve_bankruptcies(self):
         async with self.task_lock:
             bankruptcy_start = time.time()
-            bankrupt_users: list[BankruptUser] = []
+            bankrupt_users: list[BankruptUser] = []  # type: ignore
             bankrupt_users_count = 0
 
             for user in self.usermap.values():
