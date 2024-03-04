@@ -3,6 +3,7 @@ import time
 
 from typing import Optional, Union
 from dataclasses import dataclass
+from aiohttp import web
 
 from solana.rpc.core import _COMMITMENT_TO_SOLDERS
 
@@ -223,3 +224,24 @@ async def simulate_and_get_tx_with_cus(
     return SimulateAndGetTxWithCUsResponse(
         cu_estimate, tx, sim_tx_logs, resp.value.err or str_err
     )
+
+
+def make_health_check_handler(bot):
+    async def health_check_handler(_):
+        healthy = await bot.health_check()
+        if healthy:
+            return web.Response(status=200)  # OK status for healthy
+        else:
+            return web.Response(status=503)  # Service Unavailable for unhealthy
+
+    return health_check_handler
+
+
+async def start_server(bot):
+    app = web.Application()
+    health_handler = make_health_check_handler(bot)
+    app.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()

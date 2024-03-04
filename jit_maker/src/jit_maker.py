@@ -6,7 +6,7 @@ import time
 
 from datetime import datetime
 from typing import Union
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
 from aiohttp import web
 from driftpy.math.amm import calculate_bid_ask_price
 
@@ -18,7 +18,7 @@ from solders.pubkey import Pubkey
 from anchorpy import Wallet
 
 from driftpy.slot.slot_subscriber import SlotSubscriber
-from driftpy.drift_client import DriftClient, DEFAULT_TX_OPTIONS
+from driftpy.drift_client import DriftClient
 from driftpy.account_subscription_config import AccountSubscriptionConfig
 from driftpy.auction_subscriber.auction_subscriber import AuctionSubscriber
 from driftpy.auction_subscriber.types import AuctionSubscriberConfig
@@ -256,7 +256,7 @@ class JitMaker(Bot):
             uncross=False,
         )
 
-        (amm_bid, amm_ask) = calculate_bid_ask_price(perp_market_account.amm, oracle_price_data, True)
+        (amm_bid, amm_ask) = calculate_bid_ask_price(perp_market_account.amm, oracle_price_data, True)  # type: ignore
 
         if best_bid is not None:
             best_dlob_price = best_bid.get_price(
@@ -511,7 +511,9 @@ async def main():
     jitter = JitterShotgun(drift_client, auction_subscriber, jit_proxy_client, True)
 
     # This is an example of a perp JIT maker that will JIT the SOL-PERP market
-    jit_maker_perp_config = JitMakerConfig("jit maker", [0], [0], MarketType.Perp(), spread=-.001)
+    jit_maker_perp_config = JitMakerConfig(
+        "jit maker", [0], [0], MarketType.Perp(), spread=-0.001
+    )
 
     for sub_id in jit_maker_perp_config.sub_accounts:
         await drift_client.add_user(sub_id)

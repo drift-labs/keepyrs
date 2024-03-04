@@ -1,11 +1,10 @@
 import asyncio
-import logging
 import time
 import os
 import traceback
 
 from typing import Callable, Optional
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
 
 from solana.rpc.async_api import AsyncClient
 
