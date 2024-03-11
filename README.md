@@ -18,5 +18,3 @@ To adjust your account's target leverage, change the TARGET_LEVERAGE_PER_ACCOUNT
 ## PERP FILLER
 
 `poetry run python -m perp_filler.src.perp_filler`
-
-WIP
