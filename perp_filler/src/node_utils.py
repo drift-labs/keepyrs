@@ -246,7 +246,7 @@ def filter_fillable(perp_filler, node: NodeToFill) -> bool:
 
     if is_maker_empty:
         oracle_valid = is_oracle_valid(
-            perp_market_account.amm,  # type: ignore
+            perp_market_account,  # type: ignore
             oracle_price_data,  # type: ignore
             state_account.oracle_guard_rails,  # type: ignore
             get_latest_slot(perp_filler),
