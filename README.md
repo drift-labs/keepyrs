@@ -18,3 +18,14 @@ To adjust your account's target leverage, change the TARGET_LEVERAGE_PER_ACCOUNT
 ## PERP FILLER
 
 `poetry run python -m perp_filler.src.perp_filler`
+
+
+## RESTING MAKER
+
+by default, runs maker using websocket data for sol,btc,eth perpetuals on subaccount = 0. 
+
+`poetry run python -m resting_maker.src.websocket_maker`
+
+additioanlly, by default runs on solana devnet, requires `--env mainnet` for using mainnet-beta
+
+`poetry run python -m resting_maker.src.websocket_maker --env mainnet`
