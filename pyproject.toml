@@ -6,7 +6,7 @@ authors = ["frank <frank@lunoho.company>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "3.10.13"
+python = ">=3.10.6,<=3.10.13"
 anchorpy = "0.17.1"
 solana = "0.30.1"
 python-dotenv = "^1.0.0"
