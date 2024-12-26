@@ -38,8 +38,8 @@ from driftpy.constants.numeric_constants import BASE_PRECISION, PRICE_PRECISION
 from borsh_construct.enum import _rust_enum
 import os
 
-MAX_TS_BUFFER = 15 # five seconds
-PRICE_CHANGE_THRESHOLD = .00025
+MAX_TS_BUFFER = 5 # five seconds
+PRICE_CHANGE_THRESHOLD = .0005
 TARGET_MAX_POSITION_NOTIONAL = 1000 # not strict but target
 
 def check_position(drift_acct: DriftClient, market_index):
@@ -70,7 +70,7 @@ def do_trade(drift_acct: DriftClient, do_trade_params
     orders = []
     cancel_market_indexes = []
     for (market_index, 
-             binance_bid, binance_ask, drift_bid, drift_ask) in do_trade_params:
+             binance_bid, binance_ask, drift_bid, drift_ask, oracle_price) in do_trade_params:
         cancel_market_indexes.append(market_index)
         # sub_account_id = drift_acct.active_sub_account_id
         current_position = check_position(drift_acct, market_index)
@@ -86,7 +86,8 @@ def do_trade(drift_acct: DriftClient, do_trade_params
             print(f'CROSSING DRIFT ASK: {drift_bid:.3f}/{drift_ask:.3f}')
             drift_ask = drift_bid*(1.00025)
 
-        rev_offset_twap = calculate_reservation_offset(current_position, 
+        spot_pos = 4.1 if market_index == 1 else 0
+        rev_offset_twap = calculate_reservation_offset(current_position + spot_pos, 
                                                 max_base_position, 
                                                 (binance_bid+binance_ask)/2, 
                                                 calculate_mark_premium(perp_market)
@@ -96,16 +97,22 @@ def do_trade(drift_acct: DriftClient, do_trade_params
 
         rev_offset_bid = rev_offset_twap
         rev_offset_ask = rev_offset_twap
-        if current_position > 0:
+        if current_position + spot_pos > 0:
             rev_offset_ask = max(min(rev_offset_twap, rev_offset_ask_live), 0)
-        elif current_position < 0:
+        elif current_position + spot_pos < 0:
             rev_offset_bid = max(min(rev_offset_twap, rev_offset_bid_live), 0)
 
         bbid = binance_bid + rev_offset_bid
         bask = binance_ask + rev_offset_ask
 
-        ask = max(drift_bid*1.00025, max(bask, drift_ask*(1-.00025)))
-        bid = min(drift_ask*(1-.00025), min(bbid, drift_bid*(1+.00025)))
+        if market_index == 0:
+            spread = .00035
+        elif market_index ==2:
+            spread = .00015
+        else:
+            spread = .00005
+        ask = max(drift_bid*(1+spread), max(bask, drift_ask*(1-spread)))
+        bid = min(drift_ask*(1-spread), min(bbid, drift_bid*(1+spread)))
         print(f'Quoting Price: {bid:.3f}/{ask:.3f}')
 
         assert(bid<=ask)
@@ -120,7 +127,7 @@ def do_trade(drift_acct: DriftClient, do_trade_params
                 price=0,
                 market_index=market_index,
                 reduce_only=False,
-                post_only=PostOnlyParams.NONE(),
+                post_only=PostOnlyParams.TryPostOnly(),
                 immediate_or_cancel=False,
                 trigger_price=0,
                 trigger_condition=OrderTriggerCondition.Above(),
@@ -132,52 +139,41 @@ def do_trade(drift_acct: DriftClient, do_trade_params
             )
         bid_order_params = copy.deepcopy(default_order_params)
         bid_order_params.direction = PositionDirection.Long()
-        bid_order_params.price = int(bid * PRICE_PRECISION - 1)
-
-        bid_order_params2 = copy.deepcopy(default_order_params)
-        bid_order_params2.direction = PositionDirection.Long()
-        bid_order_params2.price = int(bid * (PRICE_PRECISION*.9999) - 1)
-
-
-        bid_order_params3 = copy.deepcopy(default_order_params)
-        bid_order_params3.direction = PositionDirection.Long()
-        bid_order_params3.price = int(bid * (PRICE_PRECISION*.9995) - 1)
-        bid_order_params3.base_asset_amount *= 3
+        bid_order_params.oracle_price_offset = min(int(bid * PRICE_PRECISION - 1) - int(oracle_price),-1)
+        bid_order_params.price = 0
 
         ask_order_params = copy.deepcopy(default_order_params)
         ask_order_params.direction = PositionDirection.Short()
-        ask_order_params.price = int(ask * (PRICE_PRECISION*1.00002) + 1)
+        ask_order_params.oracle_price_offset = max(int(ask * (PRICE_PRECISION) + 1) - int(oracle_price), 1)
+        ask_order_params.price = 0
 
-        ask_order_params2 = copy.deepcopy(default_order_params)
-        ask_order_params2.direction = PositionDirection.Short()
-        ask_order_params2.price = int(ask * (PRICE_PRECISION*1.0001) + 1)
-
-        ask_order_params3 = copy.deepcopy(default_order_params)
-        ask_order_params3.direction = PositionDirection.Short()
-        ask_order_params3.base_asset_amount *= 3
-        ask_order_params3.price = int(ask * (PRICE_PRECISION*1.0005) + 1)
-        # maker_info = MakerInfo(maker=Pubkey('TODO'), order=None)
-        # print('POSTIION =', current_position)
-        if current_position > -max_base_position/2:
+        if current_position + spot_pos > -max_base_position/2:
             orders.append(ask_order_params)
-        # if current_position > -max_base_position:
-        #     orders.append(ask_order_params2)
-            # orders.append(ask_order_params3)        
-        if current_position < max_base_position/2:
-            orders.append(bid_order_params)
-        # if current_position < max_base_position:
-            # orders.append(bid_order_params2)   
-            # orders.append(bid_order_params3)        
-     
-    # print(orders)
-    instr = drift_acct.get_place_orders_ix(orders)
-    # instrs = [drift_acct.get_cancel_orders_ix(sub_account_id=0, 
-    #                                             market_index=market_index,
-    #                                             market_type=MarketType.Perp(),
-    #                                             )
-    #         for market_index in cancel_market_indexes]  +
+            assert(ask_order_params.price == 0)
+        elif current_position + spot_pos > -max_base_position:
+            new_base_asset_amount = int(min(int(max_base_position/20 * BASE_PRECISION), (abs(max_base_position-current_position)/5 * BASE_PRECISION)))
+            if new_base_asset_amount > .01:
+                ask_order_params.base_asset_amount = new_base_asset_amount
+                orders.append(ask_order_params)
+                assert(ask_order_params.price == 0)
+
+        if current_position + spot_pos < max_base_position/2:
+            orders.append(bid_order_params)      
+            assert(bid_order_params.price == 0)
+        elif current_position + spot_pos < max_base_position:
+            new_base_asset_amount = int(min(int(max_base_position/20 * BASE_PRECISION), (abs(max_base_position-current_position)/5 * BASE_PRECISION)))
+            if new_base_asset_amount > .01:
+                bid_order_params.base_asset_amount = new_base_asset_amount
+                orders.append(bid_order_params)
+                assert(bid_order_params.price == 0)
+    print(orders)
+    instrs = [drift_acct.get_cancel_orders_ix(sub_account_id=sub_account_id, 
+                                                market_index=market_index,
+                                                market_type=MarketType.Perp(),
+                                                )
+            for market_index in cancel_market_indexes] 
     
-    instrs = [drift_acct.get_cancel_orders_ix(market_type=MarketType.Perp())] + [instr]
+    instrs += [drift_acct.get_place_orders_ix(orders)]
    
     asyncio.create_task(
     drift_acct.send_ixs(instrs, sequencer_subaccount=sub_account_id)
@@ -283,7 +279,7 @@ async def handle_binance_depth_feed(keypath, url, symbols, levels, update_speed,
     connection = AsyncClient(url)
 
     commitment = Processed
-    tx_opts = TxOpts(skip_confirmation=True, preflight_commitment=commitment)
+    tx_opts = TxOpts(skip_confirmation=False, preflight_commitment=commitment)
     fast_tx_sender = FastTxSender(connection, tx_opts, 3)
 
     subaccount_id = subaccount_ids[0] # todo
@@ -294,10 +290,11 @@ async def handle_binance_depth_feed(keypath, url, symbols, levels, update_speed,
         account_subscription=AccountSubscriptionConfig(
             "websocket", commitment=commitment
         ),
-        tx_params=TxParams(320_000, 500),  # crank priority fees way up
+        tx_params=TxParams(400_000, 1500),  # crank priority fees way up
         opts=tx_opts,
         tx_sender=fast_tx_sender,
         enforce_tx_sequencing=True,
+        sub_account_ids=[1],
         active_sub_account_id=subaccount_id,
     )
     await drift_acct.subscribe()
@@ -323,12 +320,14 @@ async def handle_binance_depth_feed(keypath, url, symbols, levels, update_speed,
                 (binance_bid - last_binance_bid)/last_binance_bid,
                 (binance_ask - last_binance_ask)/last_binance_ask,
             ]
+            usdt_to_usdc = .9993
+            oracle_price = drift_acct.get_oracle_price_data_for_perp_market(market_index).price
             do_trade_params.append((market_index, 
-                     binance_bid, binance_ask,
-                     drift_bid, drift_ask))
+                     binance_bid*usdt_to_usdc, binance_ask*usdt_to_usdc,
+                     drift_bid, drift_ask, oracle_price))
             
             if any([abs(x) > PRICE_CHANGE_THRESHOLD for x in pct_price_delta_array]):                
-                print(f'BINAN Price: {binance_bid:.3f}/{binance_ask:.3f}, ({cur_ts-binance_ts} seconds)')
+                print(f'BINAN Price: {binance_bid*usdt_to_usdc:.3f}/{binance_ask*usdt_to_usdc:.3f}, ({cur_ts-binance_ts} seconds)')
                 print(f'DRIFT Price: {drift_bid:.3f}/{drift_ask:.3f}, ({cur_ts-drift_ts} seconds)')
                 exec_trade_params = True
                 async with cache_lock:
@@ -340,7 +339,7 @@ async def handle_binance_depth_feed(keypath, url, symbols, levels, update_speed,
         if exec_trade_params and len(do_trade_params):
             do_trade(drift_acct, do_trade_params
                         )
-        await asyncio.sleep(.010)  # Introduce a small delay
+        await asyncio.sleep(1)  # Introduce a small delay
 
 
 if __name__ == '__main__':
